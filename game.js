@@ -17,7 +17,11 @@ const STATE = {
   OUTSIDE: "OUTSIDE",
   CUTSCENE: "CUTSCENE",
   SCHOOL: "SCHOOL",
+  SCHOOL_HALLWAY: "SCHOOL_HALLWAY",
+  CLASSROOM: "CLASSROOM",
 };
+
+const TALK_RADIUS = 70;
 
 const game = {
   state: STATE.TITLE,
@@ -41,8 +45,9 @@ canvas.addEventListener("click", () => {
 
 function handleActionKey(key) {
   if (game.state === STATE.TITLE && key === " ") startTransition(STATE.HOUSE);
-  if (game.state === STATE.SCHOOL && key === "r") startTransition(STATE.TITLE);
+  if (game.state === STATE.CLASSROOM && key === "r") startTransition(STATE.TITLE);
   if (game.state === STATE.CUTSCENE && key === " ") cutscene.t = cutscene.duration;
+  if (key === "e") tryTalk();
 }
 
 function isMoveKeyDown() {
@@ -101,6 +106,127 @@ function drawTransition() {
   alpha = Math.max(0, Math.min(1, alpha));
   ctx.fillStyle = `rgba(0,0,0,${alpha})`;
   ctx.fillRect(0, 0, W, H);
+}
+
+// ---------------------------------------------------------------------
+// Dialogue - press E near a talkable person to hear a random line
+// ---------------------------------------------------------------------
+function getTalkableNPCs() {
+  if (game.state === STATE.HOUSE) return house.npcs;
+  if (game.state === STATE.SCHOOL) return school.kids;
+  if (game.state === STATE.CLASSROOM && !classroom.seated) {
+    return [classroom.teacher, ...classroom.classmates];
+  }
+  return [];
+}
+
+function findNearestTalkable() {
+  const npcs = getTalkableNPCs();
+  let nearest = null;
+  let nearestDist = TALK_RADIUS;
+  npcs.forEach((npc) => {
+    if (!npc.lines || npc.lines.length === 0) return;
+    const dist = Math.hypot(player.x - npc.x, player.y - npc.y);
+    if (dist < nearestDist) {
+      nearest = npc;
+      nearestDist = dist;
+    }
+  });
+  return nearest;
+}
+
+function tryTalk() {
+  const npc = findNearestTalkable();
+  if (!npc) return;
+  const choices = npc.lines.filter((l) => l !== npc.speechText);
+  npc.speechText = choices.length ? choices[Math.floor(Math.random() * choices.length)] : npc.lines[0];
+  npc.speechTimer = 3.5;
+}
+
+function updateSpeech(npc, dt) {
+  if (npc.speechTimer > 0) {
+    npc.speechTimer -= dt;
+    if (npc.speechTimer <= 0) npc.speechText = null;
+  }
+}
+
+function wrapText(text, maxWidth) {
+  const words = text.split(" ");
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  });
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawSpeechBubble(x, y, text) {
+  ctx.font = "13px Trebuchet MS";
+  const maxWidth = 170;
+  const lines = wrapText(text, maxWidth);
+  const lineHeight = 16;
+  const paddingX = 12;
+  const paddingY = 10;
+  let textWidth = 0;
+  lines.forEach((l) => (textWidth = Math.max(textWidth, ctx.measureText(l).width)));
+  const boxW = textWidth + paddingX * 2;
+  const boxH = lines.length * lineHeight + paddingY * 2;
+  const boxX = x - boxW / 2;
+  const boxY = y - boxH - 14;
+
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.strokeStyle = "#3a2a1a";
+  ctx.lineWidth = 2;
+  roundRect(boxX, boxY, boxW, boxH, 10);
+  ctx.fill();
+  ctx.stroke();
+
+  // Little tail pointing down at the speaker
+  ctx.beginPath();
+  ctx.moveTo(x - 8, boxY + boxH);
+  ctx.lineTo(x + 8, boxY + boxH);
+  ctx.lineTo(x, boxY + boxH + 10);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.fill();
+  ctx.strokeStyle = "#3a2a1a";
+  ctx.beginPath();
+  ctx.moveTo(x - 8, boxY + boxH);
+  ctx.lineTo(x, boxY + boxH + 10);
+  ctx.lineTo(x + 8, boxY + boxH);
+  ctx.stroke();
+
+  ctx.fillStyle = "#222";
+  ctx.textAlign = "center";
+  lines.forEach((l, i) => {
+    ctx.fillText(l, x, boxY + paddingY + i * lineHeight + 12);
+  });
+}
+
+function drawPeopleSpeech(npcs) {
+  npcs.forEach((npc) => {
+    if (npc.speechText) drawSpeechBubble(npc.x, npc.y - 46, npc.speechText);
+  });
+}
+
+function drawTalkHint() {
+  const npc = findNearestTalkable();
+  if (npc && !npc.speechText) {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    roundRect(W / 2 - 110, H - 74, 220, 24, 8);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "13px Trebuchet MS";
+    ctx.textAlign = "center";
+    ctx.fillText(`Press E to talk${npc.label ? " to " + npc.label : ""}`, W / 2, H - 57);
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -210,13 +336,27 @@ function updatePlayerMovement(dt, bounds) {
 // ---------------------------------------------------------------------
 // NPC wander AI (family members walking around the house)
 // ---------------------------------------------------------------------
-function makeNPC(x, y, bounds, shirt, pants, hair, label, speed) {
+function makeNPC(x, y, bounds, shirt, pants, hair, label, speed, lines) {
   return {
     x, y, bounds, shirt, pants, hair, label, speed,
     tx: x, ty: y, // target point
     walkPhase: Math.random() * 10,
     facing: "down",
     retarget: 0,
+    lines: lines || [],
+    speechText: null,
+    speechTimer: 0,
+  };
+}
+
+function makeStaticPerson(x, y, shirt, pants, hair, label, lines) {
+  return {
+    x, y, shirt, pants, hair, label,
+    facing: "down",
+    walkPhase: 0,
+    lines: lines || [],
+    speechText: null,
+    speechTimer: 0,
   };
 }
 
@@ -257,9 +397,24 @@ function setupHouse() {
   player.awake = false;
   player.facing = "down";
   house.npcs = [
-    makeNPC(720, 130, { x1: 620, y1: 70, x2: 880, y2: 230 }, "#e07bb0", "#6a3fa0", "#3a2a1a", "Mom", 55),
-    makeNPC(200, 380, { x1: 80, y1: 300, x2: 500, y2: 450 }, "#3f6fb0", "#4a4a4a", "#2a2a2a", "Dad", 50),
-    makeNPC(500, 260, { x1: 100, y1: 60, x2: 880, y2: 450 }, "#5fbf5f", "#c9a04a", "#7a4a2a", "Brother", 75),
+    makeNPC(720, 130, { x1: 620, y1: 70, x2: 880, y2: 230 }, "#e07bb0", "#6a3fa0", "#3a2a1a", "Mom", 55, [
+      "Good morning, Douglas! Want some breakfast?",
+      "Don't forget to brush your teeth!",
+      "Have you seen my keys? Never mind, found them in the fridge again.",
+      "You're growing up so fast, sweetie.",
+    ]),
+    makeNPC(200, 380, { x1: 80, y1: 300, x2: 500, y2: 450 }, "#3f6fb0", "#4a4a4a", "#2a2a2a", "Dad", 50, [
+      "Hey champ! Ready to conquer the school day?",
+      "Did I tell you about the time I was late for the bus? ...Every day.",
+      "Grab an apple, they say it's good for something.",
+      "Knock knock. ...Never mind, you gotta go!",
+    ]),
+    makeNPC(500, 260, { x1: 100, y1: 60, x2: 880, y2: 450 }, "#5fbf5f", "#c9a04a", "#7a4a2a", "Brother", 75, [
+      "You're gonna be late, slowpoke!",
+      "I put a frog in your backpack. Kidding! ...Maybe.",
+      "Race you to the bus stop!",
+      "Mom said I'm the favorite now.",
+    ]),
   ];
 }
 
@@ -276,7 +431,10 @@ function updateHouse(dt) {
     });
   }
 
-  house.npcs.forEach((n) => updateNPC(n, dt));
+  house.npcs.forEach((n) => {
+    updateNPC(n, dt);
+    updateSpeech(n, dt);
+  });
 
   // Check if Douglas walked into the front door
   if (
@@ -364,6 +522,7 @@ function drawHouse() {
 
   // NPCs
   house.npcs.forEach((n) => drawCharacter(n.x, n.y, n.facing, n.shirt, n.pants, n.hair, n.walkPhase, n.label));
+  drawPeopleSpeech(house.npcs);
 
   // Player
   if (!player.awake) {
@@ -378,6 +537,7 @@ function drawHouse() {
     ctx.font = "16px Trebuchet MS";
     ctx.textAlign = "center";
     ctx.fillText("Walk to the front door to head outside", W / 2, 40);
+    drawTalkHint();
   }
 }
 
@@ -673,19 +833,38 @@ function drawCutscene() {
 // ---------------------------------------------------------------------
 // SCHOOL scene
 // ---------------------------------------------------------------------
-const school = { kids: [] };
+const school = {
+  kids: [],
+  door: { x1: 440, y1: 210, x2: 520, y2: 320 },
+};
 
 function setupSchool() {
   school.kids = [
-    makeNPC(300, 460, { x1: 260, y1: 430, x2: 420, y2: 500 }, "#e07bb0", "#f0d040", "#2a2a2a", null, 40),
-    makeNPC(650, 470, { x1: 600, y1: 430, x2: 760, y2: 500 }, "#5fbf5f", "#3f6fb0", "#5a3a1a", null, 40),
+    makeNPC(300, 460, { x1: 260, y1: 430, x2: 420, y2: 500 }, "#e07bb0", "#f0d040", "#2a2a2a", null, 40, [
+      "Hurry, the bell's about to ring!",
+      "Last one inside is a rotten egg!",
+    ]),
+    makeNPC(650, 470, { x1: 600, y1: 430, x2: 760, y2: 500 }, "#5fbf5f", "#3f6fb0", "#5a3a1a", null, 40, [
+      "Morning, Douglas!",
+      "I heard we have a pop quiz today...",
+    ]),
   ];
   player.x = W / 2;
   player.y = 480;
+  player.facing = "up";
 }
 
 function updateSchool(dt) {
-  school.kids.forEach((k) => updateNPC(k, dt));
+  school.kids.forEach((k) => {
+    updateNPC(k, dt);
+    updateSpeech(k, dt);
+  });
+  updatePlayerMovement(dt, { x1: 40, y1: 240, x2: 920, y2: 560 });
+
+  const d = school.door;
+  if (player.x > d.x1 - 25 && player.x < d.x2 + 25 && player.y < d.y2 && player.y > d.y1 - 30) {
+    startTransition(STATE.SCHOOL_HALLWAY);
+  }
 }
 
 function drawSchool() {
@@ -741,19 +920,262 @@ function drawSchool() {
 
   // Kids
   school.kids.forEach((k) => drawCharacter(k.x, k.y, k.facing, k.shirt, k.pants, k.hair, k.walkPhase, null));
+  drawPeopleSpeech(school.kids);
 
   // Player
-  drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", 0, "Douglas");
+  drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", player.moving ? player.walkPhase : 0, "Douglas");
 
-  // Text
-  ctx.fillStyle = "rgba(0,0,0,0.6)";
-  roundRect(W / 2 - 260, 350, 520, 90, 12);
+  ctx.fillStyle = "#222";
+  ctx.font = "16px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("Walk up to the school doors to go inside", W / 2, 30);
+  drawTalkHint();
+}
+
+// ---------------------------------------------------------------------
+// SCHOOL HALLWAY - a highlighted route leads to the classroom door
+// ---------------------------------------------------------------------
+const hallway = {
+  route: [
+    { x: 480, y: 560 },
+    { x: 480, y: 300 },
+    { x: 200, y: 300 },
+    { x: 200, y: 130 },
+  ],
+  classroomDoor: { x: 200, y: 120 },
+};
+
+function setupHallway() {
+  player.x = 480;
+  player.y = 560;
+  player.facing = "up";
+}
+
+function updateHallway(dt) {
+  updatePlayerMovement(dt, { x1: 50, y1: 70, x2: 910, y2: 580 });
+
+  const d = hallway.classroomDoor;
+  if (Math.hypot(player.x - d.x, player.y - d.y) < 55) {
+    startTransition(STATE.CLASSROOM);
+  }
+}
+
+function drawHallway() {
+  // Floor
+  ctx.fillStyle = "#e8dcc0";
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "rgba(0,0,0,0.06)";
+  ctx.lineWidth = 1;
+  for (let gx = 0; gx < W; gx += 60) {
+    ctx.beginPath();
+    ctx.moveTo(gx, 0);
+    ctx.lineTo(gx, H);
+    ctx.stroke();
+  }
+  for (let gy = 0; gy < H; gy += 60) {
+    ctx.beginPath();
+    ctx.moveTo(0, gy);
+    ctx.lineTo(W, gy);
+    ctx.stroke();
+  }
+
+  // Lockers along the right wall for flavor
+  for (let i = 0; i < 8; i++) {
+    ctx.fillStyle = i % 2 === 0 ? "#6fa8dc" : "#4a86c8";
+    ctx.fillRect(720 + (i % 4) * 44, 400 + Math.floor(i / 4) * 90, 36, 80);
+    ctx.strokeStyle = "#2a4a6a";
+    ctx.strokeRect(720 + (i % 4) * 44, 400 + Math.floor(i / 4) * 90, 36, 80);
+  }
+
+  // Glowing highlighted path to the classroom
+  const pulse = 0.55 + Math.sin(performance.now() / 250) * 0.25;
+  ctx.save();
+  ctx.strokeStyle = `rgba(255, 210, 60, ${pulse})`;
+  ctx.lineWidth = 26;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  hallway.route.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.85)";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  hallway.route.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+  ctx.stroke();
+  ctx.restore();
+
+  // Classroom door
+  const d = hallway.classroomDoor;
+  ctx.fillStyle = "#5a3a1a";
+  ctx.fillRect(d.x - 35, d.y - 45, 70, 90);
+  ctx.fillStyle = "#fff";
+  roundRect(d.x - 55, d.y - 78, 110, 26, 6);
+  ctx.fill();
+  ctx.fillStyle = "#333";
+  ctx.font = "bold 13px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("Douglas's Classroom", d.x, d.y - 60);
+
+  // Player
+  drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", player.moving ? player.walkPhase : 0, "Douglas");
+
+  ctx.fillStyle = "#222";
+  ctx.font = "16px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("Follow the glowing path to your classroom!", W / 2, 30);
+}
+
+// ---------------------------------------------------------------------
+// CLASSROOM - find the one open desk and sit down
+// ---------------------------------------------------------------------
+const classroom = {
+  teacher: null,
+  classmates: [],
+  emptyDesk: null,
+  seated: false,
+};
+
+function buildDeskGrid() {
+  const desks = [];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      desks.push({ x: 340 + col * 150, y: 280 + row * 110 });
+    }
+  }
+  return desks;
+}
+
+function setupClassroom() {
+  const desks = buildDeskGrid();
+  const emptyIndex = 4; // the middle desk stays open for Douglas
+  const shirts = ["#e07bb0", "#5fbf5f", "#f0a030", "#9a6fd0", "#4ac0c0", "#e0763c", "#c94a6a", "#7aa8e0"];
+  const classmateLines = [
+    "Psst, did you study for the quiz?",
+    "Nice backpack!",
+    "Sit here, next to me!",
+    "I hope it's pizza day at lunch.",
+    "Did you finish the homework? ...Me neither.",
+  ];
+
+  classroom.classmates = desks
+    .filter((_, i) => i !== emptyIndex)
+    .map((desk, i) =>
+      makeStaticPerson(desk.x, desk.y, shirts[i % shirts.length], "#3a3a3a", "#3a2a1a", null, [
+        classmateLines[i % classmateLines.length],
+      ])
+    );
+
+  classroom.emptyDesk = desks[emptyIndex];
+
+  classroom.teacher = makeStaticPerson(480, 170, "#4a8a4a", "#2a2a2a", "#3a2a1a", "Teacher", [
+    "Good morning, Douglas! Glad you could join us.",
+    "Please take your seat, we're about to start.",
+    "I hope you did your homework...",
+  ]);
+  classroom.teacher.speechText = "Good morning, Douglas! Glad you could join us.";
+  classroom.teacher.speechTimer = 4.5;
+
+  classroom.seated = false;
+  player.x = 480;
+  player.y = 560;
+  player.facing = "up";
+}
+
+function updateClassroom(dt) {
+  updateSpeech(classroom.teacher, dt);
+  classroom.classmates.forEach((c) => updateSpeech(c, dt));
+
+  if (classroom.seated) return;
+
+  updatePlayerMovement(dt, { x1: 60, y1: 150, x2: 900, y2: 580 });
+
+  const desk = classroom.emptyDesk;
+  if (Math.hypot(player.x - desk.x, player.y - desk.y) < 30) {
+    classroom.seated = true;
+    player.x = desk.x;
+    player.y = desk.y + 4;
+    player.facing = "up";
+  }
+}
+
+function drawDeskAndChair(x, y) {
+  ctx.fillStyle = "#c9a04a";
+  roundRect(x - 34, y - 6, 68, 28, 4);
+  ctx.fill();
+  ctx.strokeStyle = "#8a6a2a";
+  ctx.lineWidth = 2;
+  roundRect(x - 34, y - 6, 68, 28, 4);
+  ctx.stroke();
+  ctx.fillStyle = "#7a5a2a";
+  ctx.fillRect(x - 14, y + 22, 28, 8);
+}
+
+function drawClassroom() {
+  // Floor
+  ctx.fillStyle = "#f3e6c8";
+  ctx.fillRect(0, 0, W, H);
+
+  // Front wall + chalkboard
+  ctx.fillStyle = "#e8dcc0";
+  ctx.fillRect(0, 0, W, 70);
+  ctx.fillStyle = "#2f5c3f";
+  roundRect(340, 15, 280, 45, 6);
   ctx.fill();
   ctx.fillStyle = "#fff";
-  ctx.font = "bold 24px Trebuchet MS";
-  ctx.fillText("You made it to school, Douglas!", W / 2, 390);
-  ctx.font = "16px Trebuchet MS";
-  ctx.fillText("Thanks for playing! Press R to start again.", W / 2, 420);
+  ctx.font = "18px 'Comic Sans MS', Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("Welcome, Class!", 480, 43);
+
+  // Desks + classmates
+  classroom.classmates.forEach((c) => {
+    drawDeskAndChair(c.x, c.y);
+    drawCharacter(c.x, c.y, c.facing, c.shirt, c.pants, c.hair, c.walkPhase, c.label);
+  });
+  drawPeopleSpeech(classroom.classmates);
+
+  // The one open desk, highlighted so it's easy to spot
+  if (!classroom.seated) {
+    const d = classroom.emptyDesk;
+    const pulse = 0.4 + Math.sin(performance.now() / 220) * 0.25;
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 215, 0, ${pulse})`;
+    ctx.beginPath();
+    ctx.ellipse(d.x, d.y + 10, 46, 24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    drawDeskAndChair(d.x, d.y);
+    ctx.fillStyle = "#8a6a10";
+    ctx.font = "bold 13px Trebuchet MS";
+    ctx.textAlign = "center";
+    ctx.fillText("Your desk!", d.x, d.y - 22);
+  } else {
+    drawDeskAndChair(classroom.emptyDesk.x, classroom.emptyDesk.y);
+  }
+
+  // Teacher
+  drawCharacter(classroom.teacher.x, classroom.teacher.y, classroom.teacher.facing, classroom.teacher.shirt, classroom.teacher.pants, classroom.teacher.hair, 0, classroom.teacher.label);
+  if (classroom.teacher.speechText) drawSpeechBubble(classroom.teacher.x, classroom.teacher.y - 46, classroom.teacher.speechText);
+
+  // Player
+  drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", player.moving ? player.walkPhase : 0, "Douglas");
+
+  if (!classroom.seated) {
+    ctx.fillStyle = "#222";
+    ctx.font = "16px Trebuchet MS";
+    ctx.textAlign = "center";
+    ctx.fillText("Find your open desk and take a seat", W / 2, H - 16);
+    drawTalkHint();
+  } else {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    roundRect(W / 2 - 260, 440, 520, 90, 12);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 22px Trebuchet MS";
+    ctx.fillText("You found your seat, Douglas!", W / 2, 478);
+    ctx.font = "16px Trebuchet MS";
+    ctx.fillText("Thanks for playing! Press R to start again.", W / 2, 506);
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -793,6 +1215,8 @@ function onEnterState(state) {
   else if (state === STATE.OUTSIDE) setupOutside();
   else if (state === STATE.CUTSCENE) setupCutscene();
   else if (state === STATE.SCHOOL) setupSchool();
+  else if (state === STATE.SCHOOL_HALLWAY) setupHallway();
+  else if (state === STATE.CLASSROOM) setupClassroom();
 }
 
 // ---------------------------------------------------------------------
@@ -817,6 +1241,8 @@ function update(dt) {
     else if (game.state === STATE.OUTSIDE) updateOutside(dt);
     else if (game.state === STATE.CUTSCENE) updateCutscene(dt);
     else if (game.state === STATE.SCHOOL) updateSchool(dt);
+    else if (game.state === STATE.SCHOOL_HALLWAY) updateHallway(dt);
+    else if (game.state === STATE.CLASSROOM) updateClassroom(dt);
   }
   updateTransition(dt);
 }
@@ -828,6 +1254,8 @@ function render() {
   else if (game.state === STATE.OUTSIDE) drawOutside();
   else if (game.state === STATE.CUTSCENE) drawCutscene();
   else if (game.state === STATE.SCHOOL) drawSchool();
+  else if (game.state === STATE.SCHOOL_HALLWAY) drawHallway();
+  else if (game.state === STATE.CLASSROOM) drawClassroom();
   drawTransition();
 }
 
