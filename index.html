@@ -1,14 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Douglas's Big Morning</title>
-  <link rel="stylesheet" href="style.css" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Douglas's Big Morning</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="gameWrap">
-    <canvas id="gameCanvas" width="960" height="600"></canvas>
+
+<div id="stage">
+  <canvas id="game"></canvas>
+
+  <!-- Things drawn on top of the game (plain HTML, easier than canvas text) -->
+  <div id="objective" class="hidden"></div>
+  <div id="prompt" class="hidden"></div>
+  <div id="caption" class="hidden"></div>
+
+  <div id="bars" class="hidden"><div class="bar top"></div><div class="bar bottom"></div></div>
+
+  <div id="title">
+    <h1>Douglas's Big Morning</h1>
+    <p class="sub">Wake up, get out the door, and catch the bus to school!</p>
+    <button id="startBtn">Start</button>
+    <p class="keys">Move: <b>W A S D</b> or <b>arrow keys</b> &nbsp;·&nbsp; Do things: <b>E</b> or <b>space</b></p>
+    <p class="keys small">On a phone: drag on the left side to walk, tap the button that pops up.</p>
   </div>
-  <script src="game.js"></script>
+
+  <div id="endcard" class="hidden">
+    <h1>You made it!</h1>
+    <p class="sub">Out of bed, out the door, onto the bus, and into his seat just in time.</p>
+    <button id="againBtn">Play again</button>
+  </div>
+
+  <div id="fade"></div>
+</div>
+
+<!-- Plain script tags (no build step) so opening this file in a browser just works -->
+<script src="draw.js"></script>
+<script src="people.js"></script>
+<script src="world.js"></script>
+<script src="scenes.js"></script>
+<script src="game.js"></script>
 </body>
 </html>
