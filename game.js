@@ -1072,6 +1072,7 @@ function setupClassroom() {
     "Good morning, Douglas! Glad you could join us.",
     "Please take your seat, we're about to start.",
     "I hope you did your homework...",
+    "Class, we have a pop quiz today!",
   ]);
   classroom.teacher.speechText = "Good morning, Douglas! Glad you could join us.";
   classroom.teacher.speechTimer = 4.5;
