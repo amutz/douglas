@@ -19,6 +19,8 @@ const STATE = {
   SCHOOL: "SCHOOL",
   SCHOOL_HALLWAY: "SCHOOL_HALLWAY",
   CLASSROOM: "CLASSROOM",
+  TAXI_CUTSCENE: "TAXI_CUTSCENE",
+  DESERT_END: "DESERT_END",
 };
 
 const TALK_RADIUS = 70;
@@ -26,6 +28,12 @@ const TALK_RADIUS = 70;
 const game = {
   state: STATE.TITLE,
   transition: null, // { toState, phase: 'out'|'in', t }
+};
+
+// Tracks the story twist: once true, Douglas is fleeing the monster
+// teacher back out of the school instead of walking in normally.
+const story = {
+  fleeing: false,
 };
 
 // ---------------------------------------------------------------------
@@ -45,8 +53,9 @@ canvas.addEventListener("click", () => {
 
 function handleActionKey(key) {
   if (game.state === STATE.TITLE && key === " ") startTransition(STATE.HOUSE);
-  if (game.state === STATE.CLASSROOM && key === "r") startTransition(STATE.TITLE);
+  if (game.state === STATE.DESERT_END && key === "r") startTransition(STATE.TITLE);
   if (game.state === STATE.CUTSCENE && key === " ") cutscene.t = cutscene.duration;
+  if (game.state === STATE.TAXI_CUTSCENE && key === " ") taxiCutscene.t = taxiCutscene.duration;
   if (key === "e") tryTalk();
 }
 
@@ -292,6 +301,95 @@ function drawCharacter(x, y, facing, shirtColor, pantsColor, hairColor, walkPhas
   }
 }
 
+// A goofy-scary monster, used for the teacher's pop-quiz transformation.
+function drawMonster(x, y, phase) {
+  ctx.save();
+  ctx.translate(x, y);
+  const pulse = Math.sin(phase) * 3;
+
+  // Shadow
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.beginPath();
+  ctx.ellipse(0, 30, 28, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Legs
+  ctx.fillStyle = "#2a1a3a";
+  ctx.fillRect(-14, 10 + pulse, 10, 20);
+  ctx.fillRect(4, 10 + pulse, 10, 20);
+
+  // Body
+  ctx.fillStyle = "#3f7a3f";
+  roundRect(-20, -20 + pulse, 40, 38, 12);
+  ctx.fill();
+
+  // Arms
+  ctx.fillRect(-28, -12 + pulse, 9, 26);
+  ctx.fillRect(19, -12 + pulse, 9, 26);
+  // Claws
+  ctx.fillStyle = "#eee";
+  [-28, -25, -22].forEach((cx) => {
+    ctx.beginPath();
+    ctx.moveTo(cx, 12 + pulse);
+    ctx.lineTo(cx + 2, 20 + pulse);
+    ctx.lineTo(cx + 4, 12 + pulse);
+    ctx.fill();
+  });
+  [19, 22, 25].forEach((cx) => {
+    ctx.beginPath();
+    ctx.moveTo(cx, 12 + pulse);
+    ctx.lineTo(cx + 2, 20 + pulse);
+    ctx.lineTo(cx + 4, 12 + pulse);
+    ctx.fill();
+  });
+
+  // Head
+  ctx.fillStyle = "#4a8f4a";
+  ctx.beginPath();
+  ctx.arc(0, -32 + pulse, 19, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Horns
+  ctx.fillStyle = "#caa040";
+  ctx.beginPath();
+  ctx.moveTo(-13, -46 + pulse);
+  ctx.lineTo(-9, -64 + pulse);
+  ctx.lineTo(-4, -46 + pulse);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(4, -46 + pulse);
+  ctx.lineTo(9, -64 + pulse);
+  ctx.lineTo(13, -46 + pulse);
+  ctx.fill();
+
+  // Glowing red eyes
+  ctx.fillStyle = "#ff2020";
+  ctx.beginPath();
+  ctx.arc(-7, -34 + pulse, 4.5, 0, Math.PI * 2);
+  ctx.arc(7, -34 + pulse, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Fangs
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.moveTo(-6, -20 + pulse);
+  ctx.lineTo(-3, -11 + pulse);
+  ctx.lineTo(0, -20 + pulse);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0, -20 + pulse);
+  ctx.lineTo(3, -11 + pulse);
+  ctx.lineTo(6, -20 + pulse);
+  ctx.fill();
+
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.font = "12px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("???", x, y - 62);
+}
+
 function roundRect(x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -392,6 +490,7 @@ const house = {
 };
 
 function setupHouse() {
+  story.fleeing = false;
   player.x = 130;
   player.y = 150;
   player.awake = false;
@@ -693,7 +792,7 @@ function drawOutside() {
   }
 }
 
-function drawBus(x, y, doorOpen) {
+function drawBus(x, y, doorOpen, variant) {
   ctx.save();
   ctx.translate(x, y);
 
@@ -704,13 +803,29 @@ function drawBus(x, y, doorOpen) {
   ctx.fill();
 
   // Body
-  ctx.fillStyle = "#f4c11e";
+  ctx.fillStyle = variant === "taxi" ? "#f6c945" : "#f4c11e";
   roundRect(-70, -60, 300, 95, 16);
   ctx.fill();
   ctx.strokeStyle = "#3a2a1a";
   ctx.lineWidth = 4;
   roundRect(-70, -60, 300, 95, 16);
   ctx.stroke();
+
+  if (variant === "taxi") {
+    // Checker stripe along the side
+    ctx.fillStyle = "#222";
+    for (let i = 0; i < 9; i++) {
+      if (i % 2 === 0) ctx.fillRect(-70 + i * 30, -12, 30, 10);
+    }
+    // Roof sign
+    ctx.fillStyle = "#222";
+    roundRect(50, -84, 60, 22, 4);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 12px Trebuchet MS";
+    ctx.textAlign = "center";
+    ctx.fillText("TAXI", 80, -68);
+  }
 
   // Windows
   ctx.fillStyle = "#bfe6f5";
@@ -836,9 +951,20 @@ function drawCutscene() {
 const school = {
   kids: [],
   door: { x1: 440, y1: 210, x2: 520, y2: 320 },
+  taxi: null,
 };
 
 function setupSchool() {
+  if (story.fleeing) {
+    // Bursting back outside after the monster reveal - a taxi is already on its way
+    school.kids = [];
+    school.taxi = { x: -260, y: 480, targetX: 610, arrived: false, doorOpen: false, driving: false, callTimer: 0 };
+    player.x = 480;
+    player.y = 260;
+    player.facing = "down";
+    return;
+  }
+
   school.kids = [
     makeNPC(300, 460, { x1: 260, y1: 430, x2: 420, y2: 500 }, "#e07bb0", "#f0d040", "#2a2a2a", null, 40, [
       "Hurry, the bell's about to ring!",
@@ -861,9 +987,34 @@ function updateSchool(dt) {
   });
   updatePlayerMovement(dt, { x1: 40, y1: 240, x2: 920, y2: 560 });
 
-  const d = school.door;
-  if (player.x > d.x1 - 25 && player.x < d.x2 + 25 && player.y < d.y2 && player.y > d.y1 - 30) {
-    startTransition(STATE.SCHOOL_HALLWAY);
+  if (!story.fleeing) {
+    const d = school.door;
+    if (player.x > d.x1 - 25 && player.x < d.x2 + 25 && player.y < d.y2 && player.y > d.y1 - 30) {
+      startTransition(STATE.SCHOOL_HALLWAY);
+    }
+    return;
+  }
+
+  // Fleeing: the taxi drives in on its own, no need to wait at a stop
+  const t = school.taxi;
+  t.callTimer += dt;
+  if (t.callTimer > 0.6) t.driving = true;
+
+  if (t.driving && !t.arrived) {
+    t.x += (t.targetX - t.x) * Math.min(1, dt * 2.2);
+    if (Math.abs(t.targetX - t.x) < 2) {
+      t.x = t.targetX;
+      t.arrived = true;
+      t.doorOpen = true;
+    }
+  }
+
+  if (t.arrived) {
+    const doorX = t.x + 203;
+    const doorY = t.y - 15;
+    if (Math.hypot(player.x - doorX, player.y - doorY) < 45) {
+      startTransition(STATE.TAXI_CUTSCENE);
+    }
   }
 }
 
@@ -918,18 +1069,30 @@ function drawSchool() {
     ctx.fillRect(560 + i * 42, 120, 30, 44);
   }
 
-  // Kids
-  school.kids.forEach((k) => drawCharacter(k.x, k.y, k.facing, k.shirt, k.pants, k.hair, k.walkPhase, null));
-  drawPeopleSpeech(school.kids);
+  if (story.fleeing) {
+    // Taxi to the rescue
+    const t = school.taxi;
+    drawBus(t.x, t.y, t.doorOpen, "taxi");
+  } else {
+    // Kids
+    school.kids.forEach((k) => drawCharacter(k.x, k.y, k.facing, k.shirt, k.pants, k.hair, k.walkPhase, null));
+    drawPeopleSpeech(school.kids);
+  }
 
   // Player
   drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", player.moving ? player.walkPhase : 0, "Douglas");
 
-  ctx.fillStyle = "#222";
-  ctx.font = "16px Trebuchet MS";
   ctx.textAlign = "center";
-  ctx.fillText("Walk up to the school doors to go inside", W / 2, 30);
-  drawTalkHint();
+  if (story.fleeing) {
+    ctx.fillStyle = "#c81818";
+    ctx.font = "bold 18px Trebuchet MS";
+    ctx.fillText(school.taxi.arrived ? "Get in the taxi!" : "Calling a taxi...", W / 2, 30);
+  } else {
+    ctx.fillStyle = "#222";
+    ctx.font = "16px Trebuchet MS";
+    ctx.fillText("Walk up to the school doors to go inside", W / 2, 30);
+    drawTalkHint();
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -946,17 +1109,31 @@ const hallway = {
 };
 
 function setupHallway() {
-  player.x = 480;
-  player.y = 560;
-  player.facing = "up";
+  if (story.fleeing) {
+    const d = hallway.classroomDoor;
+    player.x = d.x;
+    player.y = d.y + 70;
+    player.facing = "down";
+  } else {
+    player.x = 480;
+    player.y = 560;
+    player.facing = "up";
+  }
 }
 
 function updateHallway(dt) {
   updatePlayerMovement(dt, { x1: 50, y1: 70, x2: 910, y2: 580 });
 
-  const d = hallway.classroomDoor;
-  if (Math.hypot(player.x - d.x, player.y - d.y) < 55) {
-    startTransition(STATE.CLASSROOM);
+  if (story.fleeing) {
+    const exitPoint = hallway.route[0];
+    if (Math.hypot(player.x - exitPoint.x, player.y - exitPoint.y) < 55) {
+      startTransition(STATE.SCHOOL);
+    }
+  } else {
+    const d = hallway.classroomDoor;
+    if (Math.hypot(player.x - d.x, player.y - d.y) < 55) {
+      startTransition(STATE.CLASSROOM);
+    }
   }
 }
 
@@ -987,10 +1164,11 @@ function drawHallway() {
     ctx.strokeRect(720 + (i % 4) * 44, 400 + Math.floor(i / 4) * 90, 36, 80);
   }
 
-  // Glowing highlighted path to the classroom
+  // Glowing highlighted path to the classroom (turns red while fleeing)
   const pulse = 0.55 + Math.sin(performance.now() / 250) * 0.25;
+  const glowRGB = story.fleeing ? "255, 60, 60" : "255, 210, 60";
   ctx.save();
-  ctx.strokeStyle = `rgba(255, 210, 60, ${pulse})`;
+  ctx.strokeStyle = `rgba(${glowRGB}, ${pulse})`;
   ctx.lineWidth = 26;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -1020,20 +1198,34 @@ function drawHallway() {
   // Player
   drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", player.moving ? player.walkPhase : 0, "Douglas");
 
-  ctx.fillStyle = "#222";
   ctx.font = "16px Trebuchet MS";
   ctx.textAlign = "center";
-  ctx.fillText("Follow the glowing path to your classroom!", W / 2, 30);
+  if (story.fleeing) {
+    ctx.fillStyle = "#c81818";
+    ctx.font = "bold 18px Trebuchet MS";
+    ctx.fillText("RUN! Get back outside!", W / 2, 30);
+  } else {
+    ctx.fillStyle = "#222";
+    ctx.fillText("Follow the glowing path to your classroom!", W / 2, 30);
+  }
 }
 
 // ---------------------------------------------------------------------
 // CLASSROOM - find the one open desk and sit down
 // ---------------------------------------------------------------------
+const QUIZ_DELAY = 1.4; // seconds after sitting down before the teacher speaks
+const QUIZ_DURATION = 3.0; // how long the pop quiz line is shown
+const TRANSFORM_DURATION = 1.4; // how long the transformation flash lasts
+
 const classroom = {
   teacher: null,
   classmates: [],
   emptyDesk: null,
+  exit: { x: 480, y: 590 },
   seated: false,
+  phase: "seeking", // seeking -> seatedWait -> quiz -> transforming -> fleeing
+  sinceSeated: 0,
+  shake: 0,
 };
 
 function buildDeskGrid() {
@@ -1076,8 +1268,12 @@ function setupClassroom() {
   ]);
   classroom.teacher.speechText = "Good morning, Douglas! Glad you could join us.";
   classroom.teacher.speechTimer = 4.5;
+  classroom.teacher.isMonster = false;
 
   classroom.seated = false;
+  classroom.phase = "seeking";
+  classroom.sinceSeated = 0;
+  classroom.shake = 0;
   player.x = 480;
   player.y = 560;
   player.facing = "up";
@@ -1086,17 +1282,50 @@ function setupClassroom() {
 function updateClassroom(dt) {
   updateSpeech(classroom.teacher, dt);
   classroom.classmates.forEach((c) => updateSpeech(c, dt));
+  if (classroom.shake > 0) classroom.shake = Math.max(0, classroom.shake - dt);
 
-  if (classroom.seated) return;
+  if (!classroom.seated) {
+    updatePlayerMovement(dt, { x1: 60, y1: 150, x2: 900, y2: 580 });
 
+    const desk = classroom.emptyDesk;
+    if (Math.hypot(player.x - desk.x, player.y - desk.y) < 30) {
+      classroom.seated = true;
+      classroom.phase = "seatedWait";
+      classroom.sinceSeated = 0;
+      player.x = desk.x;
+      player.y = desk.y + 4;
+      player.facing = "up";
+    }
+    return;
+  }
+
+  // Scripted pop-quiz -> monster reveal sequence
+  if (classroom.phase !== "fleeing") {
+    classroom.sinceSeated += dt;
+    if (classroom.phase === "seatedWait" && classroom.sinceSeated > QUIZ_DELAY) {
+      classroom.phase = "quiz";
+      classroom.teacher.speechText = "Class, we have a pop quiz today!";
+      classroom.teacher.speechTimer = QUIZ_DURATION;
+    } else if (classroom.phase === "quiz" && classroom.sinceSeated > QUIZ_DELAY + QUIZ_DURATION) {
+      classroom.phase = "transforming";
+      classroom.teacher.isMonster = true;
+      classroom.teacher.speechText = null;
+      classroom.shake = 0.6;
+    } else if (
+      classroom.phase === "transforming" &&
+      classroom.sinceSeated > QUIZ_DELAY + QUIZ_DURATION + TRANSFORM_DURATION
+    ) {
+      classroom.phase = "fleeing";
+    }
+    return;
+  }
+
+  // Fleeing: Douglas is back on his feet and needs to get out
   updatePlayerMovement(dt, { x1: 60, y1: 150, x2: 900, y2: 580 });
-
-  const desk = classroom.emptyDesk;
-  if (Math.hypot(player.x - desk.x, player.y - desk.y) < 30) {
-    classroom.seated = true;
-    player.x = desk.x;
-    player.y = desk.y + 4;
-    player.facing = "up";
+  const exit = classroom.exit;
+  if (Math.hypot(player.x - exit.x, player.y - exit.y) < 50) {
+    story.fleeing = true;
+    startTransition(STATE.SCHOOL_HALLWAY);
   }
 }
 
@@ -1113,9 +1342,28 @@ function drawDeskAndChair(x, y) {
 }
 
 function drawClassroom() {
+  ctx.save();
+  if (classroom.shake > 0) {
+    const mag = classroom.shake * 8;
+    ctx.translate((Math.random() - 0.5) * mag, (Math.random() - 0.5) * mag);
+  }
+
   // Floor
   ctx.fillStyle = "#f3e6c8";
   ctx.fillRect(0, 0, W, H);
+
+  // Exit door back to the hallway
+  const exit = classroom.exit;
+  const exitGlow = classroom.phase === "fleeing";
+  if (exitGlow) {
+    const pulse = 0.4 + Math.sin(performance.now() / 200) * 0.25;
+    ctx.fillStyle = `rgba(255, 60, 60, ${pulse})`;
+    ctx.beginPath();
+    ctx.ellipse(exit.x, exit.y - 20, 55, 30, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = "#5a3a1a";
+  ctx.fillRect(exit.x - 35, exit.y - 45, 70, 60);
 
   // Front wall + chalkboard
   ctx.fillStyle = "#e8dcc0";
@@ -1154,29 +1402,193 @@ function drawClassroom() {
     drawDeskAndChair(classroom.emptyDesk.x, classroom.emptyDesk.y);
   }
 
-  // Teacher
-  drawCharacter(classroom.teacher.x, classroom.teacher.y, classroom.teacher.facing, classroom.teacher.shirt, classroom.teacher.pants, classroom.teacher.hair, 0, classroom.teacher.label);
+  // Teacher (or monster!)
+  if (classroom.teacher.isMonster) {
+    drawMonster(classroom.teacher.x, classroom.teacher.y, performance.now() / 150);
+  } else {
+    drawCharacter(classroom.teacher.x, classroom.teacher.y, classroom.teacher.facing, classroom.teacher.shirt, classroom.teacher.pants, classroom.teacher.hair, 0, classroom.teacher.label);
+  }
   if (classroom.teacher.speechText) drawSpeechBubble(classroom.teacher.x, classroom.teacher.y - 46, classroom.teacher.speechText);
 
   // Player
   drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", player.moving ? player.walkPhase : 0, "Douglas");
 
+  ctx.textAlign = "center";
   if (!classroom.seated) {
     ctx.fillStyle = "#222";
     ctx.font = "16px Trebuchet MS";
-    ctx.textAlign = "center";
     ctx.fillText("Find your open desk and take a seat", W / 2, H - 16);
     drawTalkHint();
-  } else {
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    roundRect(W / 2 - 260, 440, 520, 90, 12);
-    ctx.fill();
-    ctx.fillStyle = "#fff";
+  } else if (classroom.phase === "transforming") {
+    ctx.fillStyle = `rgba(200, 20, 20, ${0.6 + Math.sin(performance.now() / 80) * 0.4})`;
+    ctx.font = "bold 42px Trebuchet MS";
+    ctx.fillText("RAAWR!!", W / 2, 260);
+  } else if (classroom.phase === "fleeing") {
+    ctx.fillStyle = "#c81818";
     ctx.font = "bold 22px Trebuchet MS";
-    ctx.fillText("You found your seat, Douglas!", W / 2, 478);
-    ctx.font = "16px Trebuchet MS";
-    ctx.fillText("Thanks for playing! Press R to start again.", W / 2, 506);
+    ctx.fillText("RUN! Get out of the classroom!", W / 2, H - 16);
   }
+
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------
+// TAXI CUTSCENE: escaping into the desert
+// ---------------------------------------------------------------------
+const taxiCutscene = {
+  t: 0,
+  duration: 4.5,
+  scenery: [],
+};
+
+function setupTaxiCutscene() {
+  taxiCutscene.t = 0;
+  taxiCutscene.scenery = [];
+  for (let i = 0; i < 8; i++) {
+    taxiCutscene.scenery.push({
+      x: Math.random() * W,
+      type: Math.random() < 0.5 ? "cactus" : "mesa",
+      scale: 0.7 + Math.random() * 0.6,
+    });
+  }
+}
+
+function updateTaxiCutscene(dt) {
+  taxiCutscene.t += dt;
+  const speed = 260 * dt;
+  taxiCutscene.scenery.forEach((s) => {
+    s.x -= speed;
+    if (s.x < -80) s.x += W + 160;
+  });
+  if (taxiCutscene.t >= taxiCutscene.duration) {
+    startTransition(STATE.DESERT_END);
+  }
+}
+
+function drawTaxiCutscene() {
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, 400);
+  skyGrad.addColorStop(0, "#f0a860");
+  skyGrad.addColorStop(1, "#ffe0b0");
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, 400);
+
+  // Sun
+  ctx.fillStyle = "#ffcf5c";
+  ctx.beginPath();
+  ctx.arc(760, 110, 50, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#d9a55c";
+  ctx.fillRect(0, 400, W, 200);
+
+  // Road
+  ctx.fillStyle = "#7a6248";
+  ctx.fillRect(0, 470, W, 130);
+  ctx.strokeStyle = "#f0d040";
+  ctx.setLineDash([40, 25]);
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(0, 535);
+  ctx.lineTo(W, 535);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Scrolling desert scenery
+  taxiCutscene.scenery.forEach((s) => {
+    ctx.save();
+    ctx.translate(s.x, 400);
+    ctx.scale(s.scale, s.scale);
+    if (s.type === "cactus") {
+      ctx.fillStyle = "#4a8f4a";
+      ctx.fillRect(-6, -50, 12, 50);
+      ctx.fillRect(-20, -34, 14, 10);
+      ctx.fillRect(6, -40, 14, 10);
+    } else {
+      ctx.fillStyle = "#b5764a";
+      ctx.beginPath();
+      ctx.moveTo(-40, 0);
+      ctx.lineTo(-20, -40);
+      ctx.lineTo(20, -40);
+      ctx.lineTo(40, 0);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+
+  // Taxi (big, foreground, stays centered while the desert scrolls past)
+  drawBus(W / 2 - 90, 470, false, "taxi");
+
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.font = "20px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("Douglas makes his great escape...", W / 2, 60);
+  ctx.font = "14px Trebuchet MS";
+  ctx.fillText("(press SPACE to skip)", W / 2, 86);
+}
+
+// ---------------------------------------------------------------------
+// DESERT END - the taxi drives off, leaving Douglas behind
+// ---------------------------------------------------------------------
+const desertEnd = {
+  taxiX: 480,
+};
+
+function setupDesertEnd() {
+  desertEnd.taxiX = 480;
+  player.x = 480;
+  player.y = 480;
+  player.facing = "down";
+}
+
+function updateDesertEnd(dt) {
+  if (desertEnd.taxiX < W + 200) {
+    desertEnd.taxiX += 140 * dt;
+  }
+}
+
+function drawDesertEnd() {
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+  skyGrad.addColorStop(0, "#f0a860");
+  skyGrad.addColorStop(1, "#ffe0b0");
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = "#ffcf5c";
+  ctx.beginPath();
+  ctx.arc(820, 110, 55, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#d9a55c";
+  ctx.fillRect(0, 420, W, 180);
+
+  // A couple of cacti for flavor
+  ctx.fillStyle = "#4a8f4a";
+  ctx.fillRect(120, 400, 16, 60);
+  ctx.fillRect(100, 420, 18, 14);
+  ctx.fillRect(640, 410, 14, 50);
+  ctx.fillRect(654, 424, 16, 12);
+
+  // Taxi driving away into the distance
+  const shrink = Math.max(0.15, 1 - desertEnd.taxiX / (W + 350));
+  ctx.save();
+  ctx.translate(desertEnd.taxiX, 460);
+  ctx.scale(shrink, shrink);
+  drawBus(0, 0, false, "taxi");
+  ctx.restore();
+
+  // Douglas, left behind
+  drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", 0, "Douglas");
+
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  roundRect(W / 2 - 270, 60, 540, 100, 12);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 22px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("Douglas escaped the monster... into the desert?!", W / 2, 100);
+  ctx.font = "16px Trebuchet MS";
+  ctx.fillText("Thanks for playing! Press R to start again.", W / 2, 130);
 }
 
 // ---------------------------------------------------------------------
@@ -1218,6 +1630,8 @@ function onEnterState(state) {
   else if (state === STATE.SCHOOL) setupSchool();
   else if (state === STATE.SCHOOL_HALLWAY) setupHallway();
   else if (state === STATE.CLASSROOM) setupClassroom();
+  else if (state === STATE.TAXI_CUTSCENE) setupTaxiCutscene();
+  else if (state === STATE.DESERT_END) setupDesertEnd();
 }
 
 // ---------------------------------------------------------------------
@@ -1244,6 +1658,8 @@ function update(dt) {
     else if (game.state === STATE.SCHOOL) updateSchool(dt);
     else if (game.state === STATE.SCHOOL_HALLWAY) updateHallway(dt);
     else if (game.state === STATE.CLASSROOM) updateClassroom(dt);
+    else if (game.state === STATE.TAXI_CUTSCENE) updateTaxiCutscene(dt);
+    else if (game.state === STATE.DESERT_END) updateDesertEnd(dt);
   }
   updateTransition(dt);
 }
@@ -1257,6 +1673,8 @@ function render() {
   else if (game.state === STATE.SCHOOL) drawSchool();
   else if (game.state === STATE.SCHOOL_HALLWAY) drawHallway();
   else if (game.state === STATE.CLASSROOM) drawClassroom();
+  else if (game.state === STATE.TAXI_CUTSCENE) drawTaxiCutscene();
+  else if (game.state === STATE.DESERT_END) drawDesertEnd();
   drawTransition();
 }
 
