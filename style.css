@@ -1,25 +1,188 @@
+/* Look and feel of the page around the game. */
+
+* { box-sizing: border-box; }
+
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #202030;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  background: #1b1a22;
+  overflow: hidden;
+  font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
+  color: #fff;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-#gameWrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+#stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
-#gameCanvas {
-  background: #87ceeb;
-  border: 6px solid #3a2a1a;
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  max-width: 96vw;
-  max-height: 96vh;
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hidden { display: none !important; }
+
+/* ---- The little banner at the top that says what to do next ---- */
+#objective {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 28, 40, 0.78);
+  padding: 9px 20px;
+  border-radius: 999px;
+  font-size: 17px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+/* ---- "Press E to ..." button near the bottom ---- */
+#prompt {
+  position: absolute;
+  bottom: 42px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  color: #2b2733;
+  padding: 11px 22px;
+  border-radius: 14px;
+  font-size: 18px;
+  font-weight: bold;
+  border: none;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  animation: bob 1.4s ease-in-out infinite;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translate(-50%, 0); }
+  50%      { transform: translate(-50%, -5px); }
+}
+
+@media (max-width: 620px) {
+  #objective {
+    font-size: 15px;
+    white-space: normal;
+    max-width: 86%;
+    text-align: center;
+  }
+  #prompt { font-size: 16px; bottom: 28px; }
+  #caption { font-size: 16px; white-space: normal; max-width: 90%; text-align: center; }
+}
+
+/* ---- Big shouty text, for when the teacher turns into a monster ---- */
+#shout {
+  position: absolute;
+  top: 24%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9vmin;
+  font-weight: bold;
+  letter-spacing: 3px;
+  color: #ff3a2a;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+  animation: shout 0.18s ease-in-out infinite alternate;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@keyframes shout {
+  from { transform: translateX(-50%) scale(1); }
+  to   { transform: translateX(-50%) scale(1.09); }
+}
+
+/* ---- Cutscene bits ---- */
+#bars .bar {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 9%;
+  background: #000;
+}
+#bars .bar.top { top: 0; }
+#bars .bar.bottom { bottom: 0; }
+
+#caption {
+  position: absolute;
+  bottom: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 20px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+}
+
+/* ---- Title screen and ending screen ---- */
+#title, #endcard {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: radial-gradient(circle at 50% 35%, #4a6fa5 0%, #2b2b3d 70%);
+  z-index: 5;
+}
+
+#endcard {
+  background: radial-gradient(circle at 50% 35%, #6fa55a 0%, #2b3a2b 70%);
+}
+
+#title h1, #endcard h1 {
+  margin: 0;
+  max-width: 92%;
+  font-size: 11vmin;
+  letter-spacing: 2px;
+  text-shadow: 0 6px 0 rgba(0, 0, 0, 0.25);
+}
+
+.sub {
+  margin: 6px 0 26px;
+  font-size: 20px;
+  opacity: 0.85;
+}
+
+button {
+  font: inherit;
+  font-size: 22px;
+  font-weight: bold;
+  padding: 12px 40px;
+  border: none;
+  border-radius: 16px;
+  background: #ffd45e;
+  color: #3a2f12;
+  cursor: pointer;
+  box-shadow: 0 6px 0 #c9a437;
+}
+
+button:active {
+  transform: translateY(3px);
+  box-shadow: 0 3px 0 #c9a437;
+}
+
+.keys {
+  margin: 26px 0 0;
+  font-size: 15px;
+  opacity: 0.8;
+}
+.keys.small { margin-top: 8px; font-size: 13px; opacity: 0.6; }
+
+/* ---- Black square used to fade between places ---- */
+#fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 4;
 }
