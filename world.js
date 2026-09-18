@@ -47,12 +47,12 @@ function addTiledFloor(world, x, y, w, d, colorA, colorB, tile) {
 }
 
 /* A glowing line along the floor showing where to go. */
-function drawGlowPath(ctx, route, time) {
+function drawGlowPath(ctx, route, time, rgb) {
   var pulse = 0.52 + Math.sin(time * 4) * 0.2;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = 'rgba(255, 210, 60, ' + pulse.toFixed(2) + ')';
+  ctx.strokeStyle = 'rgba(' + (rgb || '255, 210, 60') + ', ' + pulse.toFixed(2) + ')';
   ctx.lineWidth = 26 * camera.zoom;
   ctx.beginPath();
   for (var i = 0; i < route.length; i++) {
@@ -60,8 +60,8 @@ function drawGlowPath(ctx, route, time) {
     if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
   }
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-  ctx.lineWidth = 6 * camera.zoom;
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 5 * camera.zoom;
   ctx.stroke();
   ctx.restore();
 }
@@ -334,4 +334,70 @@ function pushApart(player, others) {
       player.y += (dy / dist) * (want - dist);
     }
   }
+}
+
+/* A taxi, pointing north like the bus so we can see the door on its side. */
+function drawTaxi(ctx, taxi) {
+  var x = taxi.x, y = taxi.y;
+  var w = 96, d = 210;
+  var yellow = '#f6c945';
+
+  drawShadow(ctx, x + w / 2, y + d / 2, 58, 0.16);
+
+  drawBlock(ctx, { x: x + 5, y: y + 26, w: w - 10, d: 38, h: 20, color: '#2e2b30' });
+  drawBlock(ctx, { x: x + 5, y: y + d - 64, w: w - 10, d: 38, h: 20, color: '#2e2b30' });
+
+  drawBlock(ctx, { x: x, y: y, w: w, d: d, h: 52, z: 14, color: yellow });
+  drawBlock(ctx, { x: x + 8, y: y + 48, w: w - 16, d: d - 104, h: 38, z: 66, color: shade(yellow, -0.08) });
+
+  // checker stripe down the side
+  for (var i = 0; i < 9; i++) {
+    if (i % 2 === 0) {
+      drawPanelX(ctx, x + w, y + 14 + i * 21, y + 14 + (i + 1) * 21, 30, 44, '#26242a');
+    }
+  }
+
+  // windows
+  drawPanelX(ctx, x + w - 8, y + 56, y + d - 60, 72, 98, '#c6e3ed');
+  drawPanelY(ctx, y + d - 56, x + 14, x + w - 14, 72, 100, '#c6e3ed');   // back window
+  drawPanelY(ctx, y + d, x + 6, x + 22, 22, 36, '#d8452f');
+  drawPanelY(ctx, y + d, x + w - 22, x + w - 6, 22, 36, '#d8452f');
+
+  // the door Douglas climbs into
+  var open = taxi.doorOpen || 0;
+  var dy1 = y + d - 116, dy2 = dy1 + 58;
+  drawPanelX(ctx, x + w, dy1, dy2, 16, 66, '#3c3833');
+  if (open < 1) {
+    drawPanelX(ctx, x + w, dy1, dy2 - (dy2 - dy1) * open, 16, 66, shade(yellow, -0.14));
+  }
+
+  // roof sign
+  drawBlock(ctx, { x: x + 18, y: y + 86, w: w - 36, d: 42, h: 18, z: 104, color: '#26242a' });
+  var a = toScreen(x + w - 20, y + 124, 122), b = toScreen(x + w - 20, y + 88, 122);
+  ctx.save();
+  ctx.translate(a.x, a.y);
+  ctx.rotate(Math.atan2(b.y - a.y, b.x - a.x));
+  ctx.fillStyle = '#ffd45e';
+  ctx.font = 'bold ' + Math.round(11 * camera.zoom) + 'px "Trebuchet MS", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('TAXI', 0, 0);
+  ctx.restore();
+}
+
+/* A desert cactus. */
+function drawCactus(ctx, x, y, size) {
+  size = size || 1;
+  drawShadow(ctx, x + 8 * size, y + 8 * size, 16 * size, 0.16);
+  drawBlock(ctx, { x: x - 11 * size, y: y - 11 * size, w: 22 * size, d: 22 * size, h: 92 * size, color: '#4a8f4a' });
+  drawBlock(ctx, { x: x - 34 * size, y: y - 9 * size, w: 24 * size, d: 18 * size, h: 16 * size, z: 44 * size, color: '#3f7f42' });
+  drawBlock(ctx, { x: x - 34 * size, y: y - 9 * size, w: 16 * size, d: 18 * size, h: 30 * size, z: 44 * size, color: '#3f7f42' });
+  drawBlock(ctx, { x: x + 11 * size, y: y - 9 * size, w: 24 * size, d: 18 * size, h: 14 * size, z: 60 * size, color: '#3f7f42' });
+  drawBlock(ctx, { x: x + 20 * size, y: y - 9 * size, w: 15 * size, d: 18 * size, h: 26 * size, z: 60 * size, color: '#3f7f42' });
+}
+
+/* A big lump of red rock. */
+function drawMesa(ctx, x, y, w, d, h) {
+  drawBlock(ctx, { x: x, y: y, w: w, d: d, h: h * 0.62, color: '#b5764a' });
+  drawBlock(ctx, { x: x + w * 0.14, y: y + d * 0.14, w: w * 0.72, d: d * 0.72, h: h * 0.38, z: h * 0.62, color: '#c08557' });
 }

@@ -15,6 +15,7 @@ var barsEl = document.getElementById('bars');
 var titleEl = document.getElementById('title');
 var endcardEl = document.getElementById('endcard');
 var fadeEl = document.getElementById('fade');
+var shoutEl = document.getElementById('shout');
 
 /* ---- the canvas fills the window, and stays sharp on good screens ---- */
 function resize() {
@@ -111,7 +112,11 @@ var game = {
   scene: null,
   sceneZoom: 1,
   lastDt: 0,
-  running: false
+  running: false,
+  shake: 0,
+  // Remembers that the teacher turned into a monster, so the school,
+  // hallway and classroom know Douglas is running away, not arriving.
+  story: { fleeing: false }
 };
 
 game.setObjective = function (text) {
@@ -133,6 +138,20 @@ game.showCaption = function (text) {
 
 game.showBars = function (on) {
   barsEl.classList.toggle('hidden', !on);
+};
+
+/* Big shouty text across the middle of the screen. */
+var shoutTimer = 0;
+game.showShout = function (text, seconds) {
+  if (!text) { shoutEl.classList.add('hidden'); shoutTimer = 0; return; }
+  shoutEl.textContent = text;
+  shoutEl.classList.remove('hidden');
+  shoutTimer = seconds || 1.5;
+};
+
+/* Rattles the screen, for when something startling happens. */
+game.shakeScreen = function (seconds) {
+  game.shake = seconds;
 };
 
 /* ---- moving from one place to the next, with a black fade ---------- */
@@ -160,6 +179,7 @@ function startScene(name) {
 
 game.finish = function () {
   game.running = false;
+  game.showShout('');
   promptEl.classList.add('hidden');
   objectiveEl.classList.add('hidden');
   endcardEl.classList.remove('hidden');
@@ -179,6 +199,12 @@ function update(dt) {
     if (fade.amount <= 0) fade.direction = 0;
   }
   fadeEl.style.opacity = fade.amount;
+
+  if (game.shake > 0) game.shake = Math.max(0, game.shake - dt);
+  if (shoutTimer > 0) {
+    shoutTimer -= dt;
+    if (shoutTimer <= 0) shoutEl.classList.add('hidden');
+  }
 
   if (!game.running || !game.scene) { interactPressed = false; return; }
 
@@ -261,8 +287,18 @@ function update(dt) {
 
 function render() {
   updateCamera();
+
+  var shaking = game.shake > 0;
+  if (shaking) {
+    var mag = game.shake * 12;
+    ctx.save();
+    ctx.translate((Math.random() - 0.5) * mag, (Math.random() - 0.5) * mag);
+  }
+
   if (game.scene) renderWorld(ctx, game.scene.world);
   else { ctx.fillStyle = '#332f3d'; ctx.fillRect(0, 0, view.w, view.h); }
+
+  if (shaking) ctx.restore();
 
   if (touch.id !== null) drawThumbStick();
 }
@@ -298,6 +334,9 @@ function frame(now) {
 function beginGame(sceneName) {
   titleEl.classList.add('hidden');
   endcardEl.classList.add('hidden');
+  game.showShout('');
+  game.shake = 0;
+  game.story.fleeing = false;
   game.running = true;
   fade.amount = 1;
   fade.direction = -1;

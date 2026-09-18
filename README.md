@@ -2,7 +2,8 @@
 
 A small browser game about a boy called Douglas getting to school in the
 morning. You wake him up, walk him out of the house past his family, catch
-the school bus, ride it across town, and find your seat in class.
+the school bus, ride it across town, and find your seat in class -- and
+then the pop quiz happens, and the morning stops going to plan.
 
 The view is angled and looking down on everything, a bit like Sneaky
 Sasquatch.
@@ -28,6 +29,11 @@ step, no server.
 4. **Outside school** -- walk up to the front doors and go inside.
 5. **The hallway** -- follow the glowing path to the classroom door.
 6. **The classroom** -- find the one empty desk and sit down.
+7. **The pop quiz** -- the teacher announces a quiz, then turns into a
+   monster. Follow the red path back out of the school.
+8. **The taxi** -- a taxi pulls up outside. Jump in.
+9. **The desert** -- it turns out the taxi was not going to Douglas's
+   house either.
 
 ## What's in each file
 
@@ -52,6 +58,8 @@ you don't have to replay from the beginning:
 - `index.html#school`
 - `index.html#hallway`
 - `index.html#classroom`
+- `index.html#taxiride`
+- `index.html#desert`
 
 ## Adding to the game
 

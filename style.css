@@ -79,6 +79,27 @@ html, body {
   #caption { font-size: 16px; white-space: normal; max-width: 90%; text-align: center; }
 }
 
+/* ---- Big shouty text, for when the teacher turns into a monster ---- */
+#shout {
+  position: absolute;
+  top: 24%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9vmin;
+  font-weight: bold;
+  letter-spacing: 3px;
+  color: #ff3a2a;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+  animation: shout 0.18s ease-in-out infinite alternate;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@keyframes shout {
+  from { transform: translateX(-50%) scale(1); }
+  to   { transform: translateX(-50%) scale(1.09); }
+}
+
 /* ---- Cutscene bits ---- */
 #bars .bar {
   position: absolute;

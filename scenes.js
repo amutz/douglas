@@ -461,6 +461,8 @@ Scenes.school = function (game) {
   var W = makeWorld();
   W.sky = '#8ac45c';
 
+  var fleeing = game.story.fleeing;   // running away from the monster?
+
   addGroundPatch(W, -900, -700, 3000, 3000, '#8fc95f');
   addGrassDetail(W, -300, 400, 1500, 1300, 120, 29);
   addStreet(W, -700, 2300);
@@ -515,7 +517,7 @@ Scenes.school = function (game) {
 
   // other kids in the yard
   var kid1 = new Person({
-    x: 700, y: 800, height: 78, speed: 70,
+    x: 700, y: 800, height: 78, speed: 70,  // (only out here before the bell)
     skin: '#e8b98f', hair: '#3a2f2a', shirt: '#e0674f', pants: '#4a5a7a', backpack: '#4f9a4a',
     route: [{ x: 700, y: 800 }, { x: 960, y: 760 }, { x: 980, y: 900 }, { x: 640, y: 900 }],
     lines: ['Hi Douglas!', 'Did you do the homework?', 'Race you to class!']
@@ -526,35 +528,91 @@ Scenes.school = function (game) {
     route: [{ x: 460, y: 880, wait: 2 }, { x: 460, y: 700 }, { x: 600, y: 700 }, { x: 600, y: 880 }],
     lines: ['Morning!', 'The bell is about to ring.']
   });
-  W.people.push(kid1, kid2);
+  if (!fleeing) W.people.push(kid1, kid2);
 
+  // The school bus is still parked out front when Douglas arrives; by the
+  // time he comes running back out it has gone, and a taxi shows up.
   var bus = { x: 150, y: 520, doorOpen: 1 };
-  addCustom(W, 190, 680, function (ctx) { drawBus(ctx, bus); });
+  var taxi = { x: 160, y: 1500, doorOpen: 0 };
+  var taxiHere = false;
+  var timer = 0;
+
+  if (fleeing) {
+    addCustom(W, 200, 660, function (ctx) { drawTaxi(ctx, taxi); });
+    W.props[W.props.length - 1].update = function () {
+      this.cx = taxi.x + 48;
+      this.cy = taxi.y + 105;
+      this.depth = this.cx + this.cy;
+    };
+  } else {
+    addCustom(W, 190, 680, function (ctx) { drawBus(ctx, bus); });
+  }
 
   W.bounds = { x1: 276, y1: 150, x2: 1380, y2: 1000 };
 
-  addSpot(W, {
+  var doorSpot = addSpot(W, {
     x: 815, y: 555, radius: 95, label: 'Press E to go inside',
+    active: !fleeing,
     use: function (g) { g.goTo('hallway'); }
+  });
+
+  var taxiSpot = addSpot(W, {
+    x: 300, y: 690, radius: 70, label: 'Press E to jump in the taxi',
+    active: false,
+    use: function (g) { g.goTo('taxiride'); }
   });
 
   var scene = { name: 'school', world: W, allowMove: true };
 
   scene.enter = function (g) {
-    g.douglas.x = 300;
-    g.douglas.y = 760;
-    g.douglas.faceX = 1;
-    g.douglas.faceY = -0.2;
-    camera.x = 820;      // start on the school, then drift back to Douglas
-    camera.y = 420;
-    camera.zoom = 0.85;
-    g.setObjective('You made it to school. Head for the front doors!');
-    g.douglas.speak('Made it!', 2.5);
+    if (fleeing) {
+      g.douglas.x = 815;
+      g.douglas.y = 600;
+      g.douglas.faceX = -0.6;
+      g.douglas.faceY = 1;
+      camera.x = g.douglas.x;
+      camera.y = g.douglas.y;
+      camera.zoom = 0.85;
+      g.setObjective('Calling a taxi...');
+      g.douglas.speak('TAXI!!', 2.5);
+    } else {
+      g.douglas.x = 300;
+      g.douglas.y = 760;
+      g.douglas.faceX = 1;
+      g.douglas.faceY = -0.2;
+      camera.x = 820;      // start on the school, then drift back to Douglas
+      camera.y = 420;
+      camera.zoom = 0.85;
+      g.setObjective('You made it to school. Head for the front doors!');
+      g.douglas.speak('Made it!', 2.5);
+    }
   };
 
   var arrivedTime = 0;
   scene.update = function (dt, g) {
-    // The camera starts on the school, then swings back to Douglas.
+    timer += dt;
+
+    if (fleeing) {
+      if (!taxiHere) {
+        var t = Math.min(1, timer / 3);
+        taxi.y = 1500 + (560 - 1500) * (1 - Math.pow(1 - t, 3));
+        if (t >= 1) {
+          taxiHere = true;
+          taxiSpot.active = true;
+          g.setObjective('Get in the taxi!');
+        }
+      } else {
+        taxi.doorOpen = Math.min(1, taxi.doorOpen + dt * 3);
+      }
+      for (var i = 0; i < W.props.length; i++) {
+        if (W.props[i].update) W.props[i].update();
+      }
+      camera.x += (g.douglas.x - camera.x) * Math.min(1, dt * 3);
+      camera.y += (g.douglas.y - camera.y) * Math.min(1, dt * 3);
+      return;
+    }
+
+    // Arriving: the camera starts on the school, then swings back to Douglas.
     arrivedTime += dt;
     var speed = arrivedTime < 2.5 ? 1.1 : 3;
     camera.x += (g.douglas.x - camera.x) * Math.min(1, dt * speed);
@@ -571,6 +629,8 @@ Scenes.school = function (game) {
 Scenes.hallway = function (game) {
   var W = makeWorld();
   W.sky = '#2f3340';
+
+  var fleeing = game.story.fleeing;   // running away from the monster?
 
   var WALL = '#dfe6ea';
   var TALL = 170;      // schools have high ceilings
@@ -622,7 +682,8 @@ Scenes.hallway = function (game) {
     ctx.restore();
   }, 6);
 
-  // other kids hurrying to class
+  // other kids hurrying to class (they have all gone in by the time
+  // Douglas comes running back the other way)
   var kidA = new Person({
     x: 700, y: 420, height: 80, speed: 88, backpack: '#4f9a4a',
     skin: '#e8b98f', hair: '#3a2f2a', shirt: '#e0674f', pants: '#4a5a7a',
@@ -635,33 +696,54 @@ Scenes.hallway = function (game) {
     route: [{ x: 380, y: 520, wait: 1.6 }, { x: 620, y: 520 }, { x: 620, y: 300 }, { x: 380, y: 300 }],
     lines: ['I heard we have a pop quiz today...', 'Last one inside is a rotten egg!']
   });
-  W.people.push(kidA, kidB);
+  if (!fleeing) W.people.push(kidA, kidB);
 
   W.bounds = { x1: 40, y1: 40, x2: 860, y2: 590 };
 
-  // the route that lights up on the floor
+  // the route that lights up on the floor -- it runs backwards, and turns
+  // red, once Douglas is running away from the monster
   var route = [
     { x: 660, y: 570 }, { x: 660, y: 330 }, { x: 230, y: 330 }, { x: 230, y: 110 }
   ];
-  var time = 0;
-  W.afterGround = function (ctx) { drawGlowPath(ctx, route, time); };
+  if (fleeing) route = route.slice().reverse();
 
-  addSpot(W, {
-    x: 230, y: 96, radius: 70, label: 'Press E to go into class',
-    use: function (g) { g.goTo('classroom'); }
-  });
+  var time = 0;
+  W.afterGround = function (ctx) {
+    drawGlowPath(ctx, route, time, fleeing ? '235, 40, 40' : null);
+  };
+
+  if (fleeing) {
+    addSpot(W, {
+      x: 660, y: 572, radius: 75, label: 'Press E to get outside',
+      use: function (g) { g.goTo('school'); }
+    });
+  } else {
+    addSpot(W, {
+      x: 230, y: 96, radius: 70, label: 'Press E to go into class',
+      use: function (g) { g.goTo('classroom'); }
+    });
+  }
 
   var scene = { name: 'hallway', world: W, allowMove: true };
 
   scene.enter = function (g) {
-    g.douglas.x = 660;
-    g.douglas.y = 575;
-    g.douglas.faceX = -0.4;
-    g.douglas.faceY = -1;
+    if (fleeing) {
+      g.douglas.x = 230;
+      g.douglas.y = 160;
+      g.douglas.faceX = 0.4;
+      g.douglas.faceY = 1;
+    } else {
+      g.douglas.x = 660;
+      g.douglas.y = 575;
+      g.douglas.faceX = -0.4;
+      g.douglas.faceY = -1;
+    }
     camera.x = 450;
     camera.y = 310;
     camera.zoom = 0.72;
-    g.setObjective('Follow the glowing path to your classroom.');
+    g.setObjective(fleeing
+      ? 'RUN! Follow the red path back outside!'
+      : 'Follow the glowing path to your classroom.');
   };
 
   scene.update = function (dt, g) {
@@ -762,17 +844,29 @@ Scenes.classroom = function (game) {
   });
   W.people.push(teacher);
 
+  // What the teacher turns into. Hidden until the pop quiz is announced.
+  var monster = new Person({ x: 460, y: 150, height: 118 });
+  monster.visible = false;
+  monster.draw = function (ctx) { drawMonster(ctx, this.x, this.y, time); };
+  W.people.push(monster);
+
   W.bounds = { x1: 50, y1: 200, x2: 850, y2: 590 };
 
   var time = 0;
   var seated = false;
-  var seatedFor = 0;
+  var sinceSeated = 0;
+  var phase = 'seeking';      // seeking -> sitting -> quiz -> monster -> fleeing
+  var exit = { x: 450, y: 578 };
+
   W.afterGround = function (ctx) {
-    if (seated) return;
     var pulse = 0.35 + Math.sin(time * 4) * 0.2;
     ctx.save();
     ctx.globalAlpha = pulse;
-    drawGround(ctx, seatSpot.x - 34, seatSpot.y - 30, 68, 60, '#ffd23c');
+    if (!seated) {
+      drawGround(ctx, seatSpot.x - 34, seatSpot.y - 30, 68, 60, '#ffd23c');
+    } else if (phase === 'fleeing') {
+      drawGround(ctx, exit.x - 46, exit.y - 40, 92, 70, '#ff3c3c');   // the way out
+    }
     ctx.restore();
   };
 
@@ -784,6 +878,9 @@ Scenes.classroom = function (game) {
     x: seatSpot.x, y: seatSpot.y + 20, radius: 85, label: 'Press E to sit down',
     use: function (g) {
       seated = true;
+      phase = 'sitting';
+      sinceSeated = 0;
+      sitSpot.active = false;
       scene.allowMove = false;
       g.douglas.x = seatSpot.x;
       g.douglas.y = seatSpot.y;
@@ -793,7 +890,15 @@ Scenes.classroom = function (game) {
       g.douglas.faceY = -1;
       g.douglas.moving = false;
       g.setObjective('You found your seat, Douglas!');
-      teacher.speak('Good morning, Douglas! Glad you could join us.', 4);
+      teacher.speak('Good morning, Douglas! Glad you could join us.', 3);
+    }
+  });
+
+  var exitSpot = addSpot(W, {
+    x: exit.x, y: exit.y, radius: 70, label: 'Press E to run out', active: false,
+    use: function (g) {
+      g.story.fleeing = true;
+      g.goTo('hallway');
     }
   });
 
@@ -815,12 +920,229 @@ Scenes.classroom = function (game) {
 
   scene.update = function (dt, g) {
     time += dt;
-    if (seated) {
-      seatedFor += dt;
-      if (seatedFor > 3) g.finish();
+    if (monster.visible) { monster.x = teacher.x; monster.y = teacher.y; }
+
+    // The pop quiz, and what the teacher really is.
+    if (seated && phase !== 'fleeing') {
+      sinceSeated += dt;
+
+      if (phase === 'sitting' && sinceSeated > 3.2) {
+        phase = 'quiz';
+        teacher.speak('Class, we have a pop quiz today!', 2.8);
+        g.setObjective('');
+      } else if (phase === 'quiz' && sinceSeated > 6.2) {
+        phase = 'monster';
+        teacher.visible = false;
+        teacher.route = null;
+        teacher.say = '';
+        monster.visible = true;
+        monster.x = teacher.x;
+        monster.y = teacher.y;
+        g.shakeScreen(0.8);
+        g.showShout('RAAWR!!', 1.8);
+        // the rest of the class stops chatting about homework and panics
+        for (var i = 0; i < W.people.length; i++) {
+          var kid = W.people[i];
+          if (kid === teacher || kid === monster || kid === g.douglas) continue;
+          kid.lines = ['AAAAH!', 'RUN!!', 'Not the quiz monster!', 'I did not study for THIS!'];
+          kid.lineIndex = i;
+          kid.chatCooldown = 0.4 * i;
+          kid.say = '';
+          kid.sayTimer = 0;
+        }
+      } else if (phase === 'monster' && sinceSeated > 8.0) {
+        phase = 'fleeing';
+        // Douglas jumps up out of his chair (into the gap between the rows
+        // of desks, so he does not start off stuck inside one)
+        g.douglas.sitting = false;
+        g.douglas.z = 0;
+        g.douglas.y = seatSpot.y + 10;
+        g.douglas.faceY = 1;
+        g.douglas.speak('NOPE!', 2);
+        scene.allowMove = true;
+        exitSpot.active = true;
+        g.setObjective('RUN! Get out of the classroom!');
+      }
     }
+
     camera.x += (clamp(g.douglas.x, 420, 500) - camera.x) * Math.min(1, dt * 3);
     camera.y += (clamp(g.douglas.y, 270, 350) - camera.y) * Math.min(1, dt * 3);
+  };
+
+  return scene;
+};
+
+/* ================================================================== */
+/* 7. THE TAXI RIDE INTO THE DESERT (a cutscene)                      */
+/* ================================================================== */
+
+Scenes.taxiride = function (game) {
+  var W = makeWorld();
+  W.sky = '#e7bd82';
+
+  var END_Y = -3000;
+  addGroundPatch(W, -1400, END_Y - 600, 3200, 4600, '#e0b070');   // sand
+
+  // dusty desert road
+  addGroundPatch(W, 60, END_Y - 600, 200, 4600, '#8a6a4a');
+  for (var ry = 700; ry > END_Y - 600; ry -= 130) {
+    addGroundPatch(W, 154, ry, 12, 70, '#e8c85a');
+  }
+
+  // Same trick as the bus ride: simple repeating numbers so the desert
+  // looks varied but comes out the same every time.
+  var seed = 23;
+  function nextNumber() {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  }
+
+  for (var y = 700; y > END_Y; y -= 260) {
+    var pick = nextNumber();
+
+    if (pick < 0.45) {
+      (function (yy, k) {
+        addCustom(W, 520, yy, function (ctx) { drawCactus(ctx, 480 + k * 220, yy, 0.9 + k); });
+      })(y, pick);
+    } else if (pick < 0.7) {
+      (function (yy, k) {
+        var w = 200 + k * 260;
+        addCustom(W, 560 + w / 2, yy + 90, function (ctx) {
+          drawMesa(ctx, 560, yy, w, 180, 150 + k * 190);
+        });
+      })(y, pick);
+    } else if (pick < 0.85) {
+      (function (yy) {
+        addGroundPatch(W, 420, yy, 300, 170, '#d5a361');       // dry scrub
+      })(y);
+    }
+
+    // the far side of the road
+    var other = nextNumber();
+    if (other < 0.4) {
+      (function (yy, k) {
+        addCustom(W, -220, yy, function (ctx) { drawCactus(ctx, -220 - k * 120, yy, 0.9 + k * 0.7); });
+      })(y, other);
+    } else if (other < 0.62) {
+      (function (yy, k) {
+        addCustom(W, -420, yy + 90, function (ctx) {
+          drawMesa(ctx, -560, yy, 260 + k * 200, 180, 170 + k * 200);
+        });
+      })(y, other);
+    }
+  }
+
+  var taxi = { x: 160, y: 520, doorOpen: 0 };
+  addCustom(W, 210, 620, function (ctx) { drawTaxi(ctx, taxi); });
+  var taxiProp = W.props[W.props.length - 1];
+  taxiProp.update = function () {
+    this.cx = taxi.x + 48;
+    this.cy = taxi.y + 105;
+    this.depth = this.cx + this.cy;
+  };
+
+  var time = 0;
+  var DURATION = 8;
+  var scene = { name: 'taxiride', world: W, allowMove: false, cutscene: true };
+
+  scene.enter = function (g) {
+    taxi.y = 520;
+    camera.zoom = 0.78;
+    camera.x = taxi.x + 240;
+    camera.y = taxi.y + 150;
+    g.setObjective('');
+    g.showCaption('Douglas makes his great escape...');
+    g.showBars(true);
+  };
+
+  scene.update = function (dt, g) {
+    time += dt;
+
+    var speed = 470;
+    if (time < 1) speed *= time;
+    if (time > DURATION - 1.4) speed *= Math.max(0.12, (DURATION - time) / 1.4);
+    taxi.y -= speed * dt;
+
+    if (time > 3.6 && time < 3.7) g.showCaption('Wait... this is not the way home.');
+    if (time > 6.2 && time < 6.3) g.showCaption('Is that... sand?');
+
+    for (var i = 0; i < W.props.length; i++) {
+      if (W.props[i].update) W.props[i].update();
+    }
+
+    camera.x = taxi.x + 240;
+    camera.y = taxi.y + 150;
+
+    if (time >= DURATION) g.goTo('desert');
+  };
+
+  scene.skip = function (g) { g.goTo('desert'); };
+
+  return scene;
+};
+
+/* ================================================================== */
+/* 8. THE DESERT -- the taxi drives off without him                   */
+/* ================================================================== */
+
+Scenes.desert = function (game) {
+  var W = makeWorld();
+  W.sky = '#e7bd82';
+
+  addGroundPatch(W, -2000, -3000, 5000, 5000, '#e0b070');
+  addGroundPatch(W, 60, -3000, 200, 5000, '#8a6a4a');
+  for (var ry = 900; ry > -2400; ry -= 130) {
+    addGroundPatch(W, 154, ry, 12, 70, '#e8c85a');
+  }
+
+  addCustom(W, 520, 620, function (ctx) { drawCactus(ctx, 520, 620, 1.3); });
+  addCustom(W, 700, 300, function (ctx) { drawCactus(ctx, 700, 300, 1.0); });
+  addCustom(W, 380, 940, function (ctx) { drawCactus(ctx, 380, 940, 1.1); });
+  addCustom(W, -200, 700, function (ctx) { drawCactus(ctx, -200, 700, 1.2); });
+  addCustom(W, 900, 190, function (ctx) { drawMesa(ctx, 760, 100, 380, 200, 280); });
+  addCustom(W, -520, 290, function (ctx) { drawMesa(ctx, -680, 200, 320, 180, 230); });
+
+  var taxi = { x: 160, y: 560, doorOpen: 0 };
+  addCustom(W, 210, 660, function (ctx) { drawTaxi(ctx, taxi); });
+  var taxiProp = W.props[W.props.length - 1];
+  taxiProp.update = function () {
+    this.cx = taxi.x + 48;
+    this.cy = taxi.y + 105;
+    this.depth = this.cx + this.cy;
+  };
+
+  W.bounds = { x1: -600, y1: 300, x2: 1100, y2: 1100 };
+
+  var time = 0;
+  var scene = { name: 'desert', world: W, allowMove: true };
+
+  scene.enter = function (g) {
+    taxi.y = 560;
+    g.douglas.x = 330;
+    g.douglas.y = 700;
+    g.douglas.faceX = -1;
+    g.douglas.faceY = 0.2;
+    camera.x = g.douglas.x;
+    camera.y = g.douglas.y;
+    camera.zoom = 0.85;
+    g.setObjective('Er... this is not school.');
+    g.douglas.speak('Hey! Come back!', 3);
+  };
+
+  scene.update = function (dt, g) {
+    time += dt;
+
+    // the taxi drives off up the road and leaves him there
+    if (time > 1.2) taxi.y -= 220 * dt;
+    for (var i = 0; i < W.props.length; i++) {
+      if (W.props[i].update) W.props[i].update();
+    }
+
+    if (time > 4 && time < 4.1) g.douglas.speak('...', 2.5);
+    if (time > 7) g.finish();
+
+    camera.x += (g.douglas.x - camera.x) * Math.min(1, dt * 3);
+    camera.y += (g.douglas.y - camera.y) * Math.min(1, dt * 3);
   };
 
   return scene;

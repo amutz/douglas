@@ -222,3 +222,81 @@ function drawSleeper(ctx, person, x, y, z) {
   ctx.arc(p.x + r * 0.32, p.y - r * 0.45, r * 0.2, 0.15 * Math.PI, 0.85 * Math.PI);
   ctx.stroke();
 }
+
+/* The teacher, after the pop quiz announcement. Goofy rather than scary:
+   green, with horns, claws, fangs and glowing eyes. */
+function drawMonster(ctx, x, y, time) {
+  var p = toScreen(x, y, 0);
+  var s = camera.zoom;
+  var h = 118 * s;                       // taller than a grown-up
+  var bob = Math.sin(time * 5) * h * 0.02;
+
+  var headR = h * 0.20;
+  var bodyH = h * 0.40;
+  var legH = h * 0.24;
+  var bodyW = h * 0.42;
+
+  var gy = p.y - bob;
+  var bodyTop = gy - legH - bodyH;
+  var headY = bodyTop - headR * 0.8;
+
+  drawShadow(ctx, x, y, 26, 0.26);
+
+  // legs and feet
+  roundRect(ctx, p.x - bodyW * 0.34 - bodyW * 0.16, gy - legH, bodyW * 0.32, legH, bodyW * 0.1, '#2f2140');
+  roundRect(ctx, p.x + bodyW * 0.34 - bodyW * 0.16, gy - legH, bodyW * 0.32, legH, bodyW * 0.1, '#2f2140');
+
+  // arms, ending in claws
+  var armW = bodyW * 0.24;
+  for (var side = -1; side <= 1; side += 2) {
+    var ax = p.x + side * bodyW * 0.56 - armW / 2;
+    roundRect(ctx, ax, bodyTop + bodyH * 0.1, armW, bodyH * 0.8, armW * 0.4, '#35723a');
+    for (var c = 0; c < 3; c++) {
+      var cx = ax + c * (armW / 2.4);
+      fillPoly(ctx, [
+        { x: cx, y: bodyTop + bodyH * 0.9 },
+        { x: cx + armW * 0.2, y: bodyTop + bodyH * 1.08 },
+        { x: cx + armW * 0.4, y: bodyTop + bodyH * 0.9 }
+      ], '#f2efe6');
+    }
+  }
+
+  // body
+  roundRect(ctx, p.x - bodyW / 2, bodyTop, bodyW, bodyH + legH * 0.15, bodyW * 0.3, '#3f7a3f');
+  roundRect(ctx, p.x - bodyW / 2, bodyTop, bodyW * 0.4, bodyH * 0.9, bodyW * 0.28, '#4a8f4a');
+
+  // head
+  circle(ctx, p.x, headY, headR, '#4a8f4a');
+
+  // horns
+  fillPoly(ctx, [
+    { x: p.x - headR * 0.78, y: headY - headR * 0.6 },
+    { x: p.x - headR * 0.5, y: headY - headR * 1.8 },
+    { x: p.x - headR * 0.16, y: headY - headR * 0.72 }
+  ], '#caa040');
+  fillPoly(ctx, [
+    { x: p.x + headR * 0.16, y: headY - headR * 0.72 },
+    { x: p.x + headR * 0.5, y: headY - headR * 1.8 },
+    { x: p.x + headR * 0.78, y: headY - headR * 0.6 }
+  ], '#caa040');
+
+  // glowing eyes
+  ctx.save();
+  ctx.shadowColor = '#ff4020';
+  ctx.shadowBlur = 12 * s;
+  circle(ctx, p.x - headR * 0.36, headY + headR * 0.05, headR * 0.22, '#ff2020');
+  circle(ctx, p.x + headR * 0.36, headY + headR * 0.05, headR * 0.22, '#ff2020');
+  ctx.restore();
+
+  // fangs
+  fillPoly(ctx, [
+    { x: p.x - headR * 0.34, y: headY + headR * 0.42 },
+    { x: p.x - headR * 0.16, y: headY + headR * 0.92 },
+    { x: p.x, y: headY + headR * 0.42 }
+  ], '#f2efe6');
+  fillPoly(ctx, [
+    { x: p.x, y: headY + headR * 0.42 },
+    { x: p.x + headR * 0.16, y: headY + headR * 0.92 },
+    { x: p.x + headR * 0.34, y: headY + headR * 0.42 }
+  ], '#f2efe6');
+}
