@@ -56,7 +56,7 @@ function handleActionKey(key) {
   if (game.state === STATE.DESERT_END && key === "r") startTransition(STATE.TITLE);
   if (game.state === STATE.CUTSCENE && key === " ") cutscene.t = cutscene.duration;
   if (game.state === STATE.TAXI_CUTSCENE && key === " ") taxiCutscene.t = taxiCutscene.duration;
-  if (key === "e") tryTalk();
+  if (key === "e") tryInteract();
 }
 
 function isMoveKeyDown() {
@@ -150,6 +150,35 @@ function tryTalk() {
   const choices = npc.lines.filter((l) => l !== npc.speechText);
   npc.speechText = choices.length ? choices[Math.floor(Math.random() * choices.length)] : npc.lines[0];
   npc.speechTimer = 3.5;
+}
+
+// In the house, E can also turn on the TV or do a morning chore, on top
+// of talking to family members. Elsewhere it's just talking.
+function tryInteract() {
+  if (game.state === STATE.HOUSE) {
+    const action = findNearestHouseAction();
+    if (!action) return;
+    if (action.type === "npc") {
+      const npc = action.ref;
+      const choices = npc.lines.filter((l) => l !== npc.speechText);
+      npc.speechText = choices.length ? choices[Math.floor(Math.random() * choices.length)] : npc.lines[0];
+      npc.speechTimer = 3.5;
+    } else if (action.type === "tv") {
+      house.tv.on = !house.tv.on;
+      showHouseMessage(house.tv.on ? "Douglas turns on the TV. Cartoons!" : "Douglas turns off the TV.");
+    } else if (action.type === "chore") {
+      action.ref.done = true;
+      const allDone = house.chores.every((c) => c.done);
+      if (allDone && !house.allChoresCelebrated) {
+        house.allChoresCelebrated = true;
+        showHouseMessage("Great job! All your morning chores are done!");
+      } else {
+        showHouseMessage(action.ref.doneMessage);
+      }
+    }
+    return;
+  }
+  tryTalk();
 }
 
 function updateSpeech(npc, dt) {
@@ -484,9 +513,13 @@ function updateNPC(npc, dt) {
 // HOUSE scene
 // ---------------------------------------------------------------------
 const house = {
-  floor: { x1: 40, y1: 40, x2: 920, y2: 480 },
-  door: { x1: 420, y1: 462, x2: 540, y2: 486 },
+  floor: { x1: 30, y1: 30, x2: 930, y2: 550 },
+  door: { x1: 420, y1: 532, x2: 540, y2: 556 },
   npcs: [],
+  tv: null,
+  chores: [],
+  allChoresCelebrated: false,
+  message: null,
 };
 
 function setupHouse() {
@@ -495,20 +528,31 @@ function setupHouse() {
   player.y = 150;
   player.awake = false;
   player.facing = "down";
+  house.message = null;
+  house.allChoresCelebrated = false;
+
+  house.tv = { x: 60, y: 345, w: 130, h: 95, on: false, radius: 65 };
+
+  house.chores = [
+    { id: "bed", x: 125, y: 120, radius: 75, label: "make your bed", doneMessage: "Douglas makes his bed. So tidy!", done: false },
+    { id: "teeth", x: 845, y: 284, radius: 55, label: "brush your teeth", doneMessage: "Sparkling clean teeth!", done: false },
+    { id: "breakfast", x: 560, y: 460, radius: 70, label: "eat breakfast", doneMessage: "Yum, breakfast is done! Ready for school.", done: false },
+  ];
+
   house.npcs = [
-    makeNPC(720, 130, { x1: 620, y1: 70, x2: 880, y2: 230 }, "#e07bb0", "#6a3fa0", "#3a2a1a", "Mom", 55, [
+    makeNPC(800, 110, { x1: 715, y1: 45, x2: 920, y2: 220 }, "#e07bb0", "#6a3fa0", "#3a2a1a", "Mom", 55, [
       "Good morning, Douglas! Want some breakfast?",
       "Don't forget to brush your teeth!",
       "Have you seen my keys? Never mind, found them in the fridge again.",
       "You're growing up so fast, sweetie.",
     ]),
-    makeNPC(200, 380, { x1: 80, y1: 300, x2: 500, y2: 450 }, "#3f6fb0", "#4a4a4a", "#2a2a2a", "Dad", 50, [
+    makeNPC(330, 300, { x1: 80, y1: 250, x2: 760, y2: 540 }, "#3f6fb0", "#4a4a4a", "#2a2a2a", "Dad", 50, [
       "Hey champ! Ready to conquer the school day?",
       "Did I tell you about the time I was late for the bus? ...Every day.",
       "Grab an apple, they say it's good for something.",
       "Knock knock. ...Never mind, you gotta go!",
     ]),
-    makeNPC(500, 260, { x1: 100, y1: 60, x2: 880, y2: 450 }, "#5fbf5f", "#c9a04a", "#7a4a2a", "Brother", 75, [
+    makeNPC(600, 260, { x1: 100, y1: 60, x2: 900, y2: 540 }, "#5fbf5f", "#c9a04a", "#7a4a2a", "Brother", 75, [
       "You're gonna be late, slowpoke!",
       "I put a frog in your backpack. Kidding! ...Maybe.",
       "Race you to the bus stop!",
@@ -535,6 +579,11 @@ function updateHouse(dt) {
     updateSpeech(n, dt);
   });
 
+  if (house.message) {
+    house.message.timer -= dt;
+    if (house.message.timer <= 0) house.message = null;
+  }
+
   // Check if Douglas walked into the front door
   if (
     wasAwake === true &&
@@ -546,6 +595,143 @@ function updateHouse(dt) {
   }
 }
 
+// Finds whatever Douglas is standing closest to that E can act on: a
+// family member to talk to, the TV, or an unfinished chore.
+function findNearestHouseAction() {
+  let nearest = null;
+  let nearestDist = Infinity;
+
+  house.npcs.forEach((npc) => {
+    if (!npc.lines || npc.lines.length === 0) return;
+    const dist = Math.hypot(player.x - npc.x, player.y - npc.y);
+    if (dist < TALK_RADIUS && dist < nearestDist) {
+      nearest = { type: "npc", ref: npc, label: `Press E to talk${npc.label ? " to " + npc.label : ""}` };
+      nearestDist = dist;
+    }
+  });
+
+  const tvX = house.tv.x + house.tv.w / 2;
+  const tvY = house.tv.y + house.tv.h / 2;
+  const tvDist = Math.hypot(player.x - tvX, player.y - tvY);
+  if (tvDist < house.tv.radius && tvDist < nearestDist) {
+    nearest = { type: "tv", label: house.tv.on ? "Press E to turn off the TV" : "Press E to turn on the TV" };
+    nearestDist = tvDist;
+  }
+
+  house.chores.forEach((c) => {
+    if (c.done) return;
+    const dist = Math.hypot(player.x - c.x, player.y - c.y);
+    if (dist < c.radius && dist < nearestDist) {
+      nearest = { type: "chore", ref: c, label: `Press E to ${c.label}` };
+      nearestDist = dist;
+    }
+  });
+
+  return nearest;
+}
+
+function showHouseMessage(text) {
+  house.message = { text, timer: 2.6 };
+}
+
+function drawHouseHint() {
+  const action = findNearestHouseAction();
+  if (!action) return;
+  if (action.type === "npc" && action.ref.speechText) return;
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  roundRect(W / 2 - 140, H - 74, 280, 24, 8);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "13px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText(action.label, W / 2, H - 57);
+}
+
+function drawChoreChecklist() {
+  const items = house.chores;
+  const boxW = 190;
+  const boxH = 30 + items.length * 20;
+  const boxX = W - boxW - 14;
+  const boxY = 14;
+
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.strokeStyle = "#3a2a1a";
+  ctx.lineWidth = 2;
+  roundRect(boxX, boxY, boxW, boxH, 10);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#222";
+  ctx.font = "bold 13px Trebuchet MS";
+  ctx.textAlign = "left";
+  ctx.fillText("Morning Chores", boxX + 12, boxY + 18);
+
+  items.forEach((c, i) => {
+    const ry = boxY + 34 + i * 20;
+    ctx.strokeStyle = "#3a2a1a";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(boxX + 12, ry - 11, 14, 14);
+    if (c.done) {
+      ctx.fillStyle = "#3f8f3f";
+      ctx.fillRect(boxX + 14, ry - 9, 10, 10);
+    }
+    ctx.fillStyle = "#222";
+    ctx.font = "12px Trebuchet MS";
+    ctx.fillText(c.label.charAt(0).toUpperCase() + c.label.slice(1), boxX + 32, ry);
+  });
+
+  ctx.textAlign = "center";
+}
+
+function drawHouseMessage(text) {
+  ctx.font = "bold 14px Trebuchet MS";
+  ctx.textAlign = "center";
+  const w = Math.min(520, ctx.measureText(text).width + 40);
+  ctx.fillStyle = "rgba(0,0,0,0.7)";
+  roundRect(W / 2 - w / 2, 64, w, 30, 10);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.fillText(text, W / 2, 84);
+}
+
+// A working TV: press E nearby to switch it on or off. When it's on it
+// plays a little animated cartoon; when it's off the screen is dark.
+function drawTV(tv) {
+  ctx.fillStyle = "#333";
+  roundRect(tv.x, tv.y, tv.w, tv.h, 8);
+  ctx.fill();
+
+  const sx = tv.x + 10, sy = tv.y + 8, sw = tv.w - 20, sh = tv.h - 26;
+  if (tv.on) {
+    const hue = (performance.now() / 15) % 360;
+    ctx.fillStyle = `hsl(${hue}, 70%, 55%)`;
+    ctx.fillRect(sx, sy, sw, sh);
+    const bounce = Math.abs(Math.sin(performance.now() / 300)) * (sh - 26);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(sx + sw / 2, sy + sh - 12 - bounce, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#222";
+    ctx.font = "bold 10px Trebuchet MS";
+    ctx.textAlign = "center";
+    ctx.fillText("TOONS!", sx + sw / 2, sy + 13);
+  } else {
+    ctx.fillStyle = "#111";
+    ctx.fillRect(sx, sy, sw, sh);
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.beginPath();
+    ctx.moveTo(sx, sy + sh);
+    ctx.lineTo(sx + sw, sy);
+    ctx.lineTo(sx + sw, sy + 10);
+    ctx.lineTo(sx + 10, sy + sh);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.fillStyle = "#222";
+  ctx.fillRect(tv.x + tv.w / 2 - 20, tv.y + tv.h, 40, 8);
+}
+
 function drawHouse() {
   // Outside-the-house background peeking through (just a neutral color)
   ctx.fillStyle = "#2b2b3a";
@@ -553,17 +739,27 @@ function drawHouse() {
 
   const f = house.floor;
 
-  // Bedroom zone (top-left)
-  ctx.fillStyle = "#cfe8f5";
-  ctx.fillRect(f.x1, f.y1, 320, 220);
-  // Kitchen zone (top-right)
-  ctx.fillStyle = "#f7edc6";
-  ctx.fillRect(f.x1 + 560, f.y1, 320, 220);
-  // Living room zone (bottom band)
-  ctx.fillStyle = "#d9f0d3";
-  ctx.fillRect(f.x1, f.y1 + 220, f.x2 - f.x1, f.y2 - f.y1 - 220);
+  // --- Room zones (row 1: bedrooms + kitchen, row 2: living/dining) ---
+  ctx.fillStyle = "#cfe8f5"; // Douglas's room
+  ctx.fillRect(30, 30, 225, 200);
+  ctx.fillStyle = "#f5dbe8"; // Mom & Dad's room
+  ctx.fillRect(255, 30, 225, 200);
+  ctx.fillStyle = "#dcefd0"; // Brother's room
+  ctx.fillRect(480, 30, 225, 200);
+  ctx.fillStyle = "#f7edc6"; // Kitchen
+  ctx.fillRect(705, 30, 225, 200);
 
-  // Walls / outline
+  ctx.fillStyle = "#d9f0d3"; // Living / dining room
+  ctx.fillRect(30, 230, 900, 320);
+
+  // Bathroom nook, tucked under the kitchen, with its own little walls
+  ctx.fillStyle = "#d7f0f5";
+  ctx.fillRect(790, 230, 140, 120);
+  ctx.strokeStyle = "#3a2a1a";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(790, 230, 140, 120);
+
+  // Outer walls / outline
   ctx.strokeStyle = "#3a2a1a";
   ctx.lineWidth = 8;
   ctx.strokeRect(f.x1, f.y1, f.x2 - f.x1, f.y2 - f.y1);
@@ -578,46 +774,115 @@ function drawHouse() {
   ctx.textAlign = "center";
   ctx.fillText("front door", (house.door.x1 + house.door.x2) / 2, f.y2 + 26);
 
+  // Room labels
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  ctx.font = "12px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("Douglas's Room", 142, 220);
+  ctx.fillText("Mom & Dad's Room", 367, 220);
+  ctx.fillText("Brother's Room", 592, 220);
+  ctx.fillText("Kitchen", 817, 220);
+  ctx.fillText("Bathroom", 860, 340);
+  ctx.fillText("Living Room", 420, 250);
+
   // --- Furniture ---
-  // Bed
+  // Douglas's bed
   ctx.fillStyle = "#8a5a3a";
-  ctx.fillRect(70, 70, 120, 150);
+  ctx.fillRect(50, 55, 150, 130);
   ctx.fillStyle = "#e75c5c";
-  ctx.fillRect(80, 80, 100, 100);
+  ctx.fillRect(60, 65, 130, 90);
   ctx.fillStyle = "#fff";
-  ctx.fillRect(85, 85, 90, 24);
+  ctx.fillRect(65, 70, 120, 22);
   if (!player.awake) {
     ctx.fillStyle = "#333";
     ctx.font = "bold 16px Trebuchet MS";
-    ctx.fillText("Zzz...", 220, 110);
+    ctx.fillText("Zzz...", 215, 100);
   }
-  // Nightstand
   ctx.fillStyle = "#6a4a2a";
-  ctx.fillRect(200, 200, 30, 30);
+  ctx.fillRect(215, 150, 30, 30);
 
-  // Kitchen counter + table
+  // Mom & Dad's bed
+  ctx.fillStyle = "#8a5a3a";
+  ctx.fillRect(280, 65, 170, 110);
+  ctx.fillStyle = "#7a6fd0";
+  ctx.fillRect(290, 75, 150, 80);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(295, 80, 65, 20);
+  ctx.fillRect(370, 80, 65, 20);
+  ctx.fillStyle = "#6a4a2a";
+  ctx.fillRect(290, 185, 60, 25);
+
+  // Brother's bed
+  ctx.fillStyle = "#8a5a3a";
+  ctx.fillRect(505, 65, 140, 110);
+  ctx.fillStyle = "#3f8f3f";
+  ctx.fillRect(515, 75, 120, 80);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(520, 80, 110, 20);
+  ctx.fillStyle = "#e08a2a";
+  ctx.fillRect(650, 150, 45, 35);
+  ctx.strokeStyle = "#8a5a1a";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(650, 150, 45, 35);
+
+  // Kitchen counter, fridge + table
   ctx.fillStyle = "#b08a5a";
-  ctx.fillRect(620, 60, 260, 26);
+  ctx.fillRect(715, 55, 200, 26);
+  ctx.fillStyle = "#dfe6ea";
+  ctx.fillRect(715, 95, 45, 120);
+  ctx.strokeStyle = "#9aa8b0";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(715, 95, 45, 120);
   ctx.fillStyle = "#8a6a3a";
-  ctx.fillRect(720, 160, 70, 45);
+  ctx.fillRect(820, 150, 70, 45);
   ctx.fillStyle = "#c9a04a";
-  ctx.fillRect(700, 150, 20, 20);
-  ctx.fillRect(800, 150, 20, 20);
+  ctx.fillRect(800, 140, 20, 20);
+  ctx.fillRect(900, 140, 20, 20);
 
-  // Living room couch + TV
+  // Bathroom sink, mirror + toilet
+  ctx.fillStyle = "#bcd8e0";
+  ctx.fillRect(815, 240, 60, 20);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(815, 270, 60, 28);
+  ctx.fillStyle = "#999";
+  ctx.fillRect(840, 258, 6, 14);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(888, 270, 30, 16);
+  ctx.fillRect(890, 290, 26, 30);
+
+  // Living room couch
   ctx.fillStyle = "#6a5acd";
-  roundRect(70, 300, 140, 45, 10);
+  roundRect(60, 260, 190, 55, 12);
   ctx.fill();
-  ctx.fillStyle = "#333";
-  ctx.fillRect(70, 400, 60, 40);
-  ctx.fillStyle = "#111";
-  ctx.fillRect(75, 405, 50, 30);
+
+  // TV
+  drawTV(house.tv);
 
   // Dining table
   ctx.fillStyle = "#a5673f";
   ctx.beginPath();
-  ctx.ellipse(500, 400, 55, 35, 0, 0, Math.PI * 2);
+  ctx.ellipse(560, 460, 70, 38, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.fillStyle = "#7a5a2a";
+  [[490, 460], [630, 460], [560, 415], [560, 505]].forEach(([cx, cy]) => {
+    ctx.fillRect(cx - 8, cy - 8, 16, 16);
+  });
+
+  // Glow under whichever chore/TV hotspot Douglas can use right now
+  if (player.awake) {
+    const action = findNearestHouseAction();
+    if (action && (action.type === "tv" || action.type === "chore")) {
+      const hx = action.type === "tv" ? house.tv.x + house.tv.w / 2 : action.ref.x;
+      const hy = action.type === "tv" ? house.tv.y + house.tv.h / 2 : action.ref.y;
+      const pulse = 0.35 + Math.sin(performance.now() / 220) * 0.15;
+      ctx.save();
+      ctx.fillStyle = `rgba(255, 215, 0, ${pulse})`;
+      ctx.beginPath();
+      ctx.ellipse(hx, hy, 40, 22, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
 
   // NPCs
   house.npcs.forEach((n) => drawCharacter(n.x, n.y, n.facing, n.shirt, n.pants, n.hair, n.walkPhase, n.label));
@@ -629,14 +894,16 @@ function drawHouse() {
     ctx.fillStyle = "#222";
     ctx.font = "16px Trebuchet MS";
     ctx.textAlign = "center";
-    ctx.fillText("Press an arrow key (or WASD) to wake up!", W / 2, 40);
+    ctx.fillText("Press an arrow key (or WASD) to wake up!", W / 2, 44);
   } else {
     drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", player.moving ? player.walkPhase : 0, "Douglas");
     ctx.fillStyle = "#222";
     ctx.font = "16px Trebuchet MS";
     ctx.textAlign = "center";
-    ctx.fillText("Walk to the front door to head outside", W / 2, 40);
-    drawTalkHint();
+    ctx.fillText("Do your morning chores, then head out the front door!", W / 2, 44);
+    drawHouseHint();
+    drawChoreChecklist();
+    if (house.message) drawHouseMessage(house.message.text);
   }
 }
 
