@@ -21,6 +21,9 @@ const STATE = {
   CLASSROOM: "CLASSROOM",
   TAXI_CUTSCENE: "TAXI_CUTSCENE",
   DESERT_END: "DESERT_END",
+  PORTAL: "PORTAL",
+  HERO_REALM: "HERO_REALM",
+  CAVE: "CAVE",
 };
 
 const TALK_RADIUS = 70;
@@ -42,7 +45,10 @@ const story = {
 const keys = {};
 window.addEventListener("keydown", (e) => {
   keys[e.key.toLowerCase()] = true;
-  handleActionKey(e.key.toLowerCase());
+  // Only react once per press, not over and over while a key is held
+  if (!e.repeat) handleActionKey(e.key.toLowerCase());
+  // Stop SPACE and the arrow keys from scrolling the page
+  if (e.key === " " || e.key.startsWith("Arrow")) e.preventDefault();
 });
 window.addEventListener("keyup", (e) => {
   keys[e.key.toLowerCase()] = false;
@@ -52,8 +58,31 @@ canvas.addEventListener("click", () => {
 });
 
 function handleActionKey(key) {
+  if (game.transition) return;
   if (game.state === STATE.TITLE && key === " ") startTransition(STATE.HOUSE);
-  if (game.state === STATE.DESERT_END && key === "r") startTransition(STATE.TITLE);
+  if (game.state === STATE.PORTAL && key === " ") portalCutscene.t = portalCutscene.duration;
+
+  // Superhero part of the story: dialogue first, then powers
+  if (game.state === STATE.HERO_REALM || game.state === STATE.CAVE) {
+    if (dialogueActive()) {
+      if (key === " " || key === "e") advanceDialogue();
+      return;
+    }
+    if (game.state === STATE.CAVE && cave.phase === "lost" && key === " ") {
+      resetCaveFight();
+      cave.phase = "fight";
+      return;
+    }
+    if (game.state === STATE.CAVE && cave.phase === "end" && key === "r") {
+      clearDialogue();
+      startTransition(STATE.TITLE);
+      return;
+    }
+    if (game.state === STATE.CAVE && cave.phase !== "fight") return;
+    if (key === " ") tryBlast();
+    if (key === "shift") tryDash();
+    return;
+  }
   if (game.state === STATE.CUTSCENE && key === " ") cutscene.t = cutscene.duration;
   if (game.state === STATE.TAXI_CUTSCENE && key === " ") taxiCutscene.t = taxiCutscene.duration;
   if (key === "e") tryInteract();
@@ -1795,22 +1824,59 @@ function drawTaxiCutscene() {
 }
 
 // ---------------------------------------------------------------------
-// DESERT END - the taxi drives off, leaving Douglas behind
+// DESERT END - the taxi drives off, leaving Douglas behind... until a
+// superhero swoops down out of the sky and carries him away.
 // ---------------------------------------------------------------------
 const desertEnd = {
   taxiX: 480,
+  phase: "taxi", // taxi -> stranded -> heroComing -> carrying
+  t: 0,
+  heroX: 0,
+  heroY: 0,
 };
 
 function setupDesertEnd() {
   desertEnd.taxiX = 480;
+  desertEnd.phase = "taxi";
+  desertEnd.t = 0;
+  desertEnd.heroX = W + 80;
+  desertEnd.heroY = -80;
   player.x = 480;
   player.y = 480;
   player.facing = "down";
 }
 
 function updateDesertEnd(dt) {
+  desertEnd.t += dt;
   if (desertEnd.taxiX < W + 200) {
     desertEnd.taxiX += 140 * dt;
+  }
+
+  if (desertEnd.phase === "taxi" && desertEnd.taxiX >= W + 100) {
+    desertEnd.phase = "stranded";
+    desertEnd.t = 0;
+  } else if (desertEnd.phase === "stranded" && desertEnd.t > 1.8) {
+    desertEnd.phase = "heroComing";
+    desertEnd.t = 0;
+  } else if (desertEnd.phase === "heroComing") {
+    // Swoop in toward Douglas, slowing down as he gets close
+    const targetX = player.x;
+    const targetY = player.y - 40;
+    desertEnd.heroX += (targetX - desertEnd.heroX) * Math.min(1, dt * 2.5);
+    desertEnd.heroY += (targetY - desertEnd.heroY) * Math.min(1, dt * 2.5);
+    if (desertEnd.t > 2.2) {
+      desertEnd.phase = "carrying";
+      desertEnd.t = 0;
+    }
+  } else if (desertEnd.phase === "carrying") {
+    // Fly up and away with Douglas
+    desertEnd.heroX -= 260 * dt;
+    desertEnd.heroY -= 300 * dt;
+    player.x = desertEnd.heroX;
+    player.y = desertEnd.heroY + 40;
+    if (desertEnd.t > 1.6 && !game.transition) {
+      startPortalCutscene(STATE.HERO_REALM, "desert");
+    }
   }
 }
 
@@ -1844,18 +1910,1173 @@ function drawDesertEnd() {
   drawBus(0, 0, false, "taxi");
   ctx.restore();
 
-  // Douglas, left behind
-  drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", 0, "Douglas");
+  const now = performance.now() / 1000;
+  const phase = desertEnd.phase;
 
+  if (phase === "carrying") {
+    drawHeroCarrying(desertEnd.heroX, desertEnd.heroY, now);
+  } else {
+    drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", 0, "Douglas");
+    if (phase === "heroComing") {
+      drawHero(desertEnd.heroX, desertEnd.heroY, now, { flying: true });
+      if (desertEnd.t > 0.8) drawSpeechBubble(desertEnd.heroX, desertEnd.heroY - 50, "Hang on, kid! I've got you!");
+    }
+  }
+
+  let title = "Douglas escaped the monster... into the desert?!";
+  let sub = "The taxi is driving away...";
+  if (phase === "stranded") {
+    title = "Oh no... Douglas is stranded in the desert!";
+    sub = "Wait... what's that up in the sky?!";
+  } else if (phase === "heroComing") {
+    title = "It's a superhero!";
+    sub = "Captain Comet swoops down out of the sky!";
+  } else if (phase === "carrying") {
+    title = "Captain Comet swoops Douglas up!";
+    sub = "Up, up, and away!";
+  }
   ctx.fillStyle = "rgba(0,0,0,0.6)";
   roundRect(W / 2 - 270, 60, 540, 100, 12);
   ctx.fill();
   ctx.fillStyle = "#fff";
   ctx.font = "bold 22px Trebuchet MS";
   ctx.textAlign = "center";
-  ctx.fillText("Douglas escaped the monster... into the desert?!", W / 2, 100);
+  ctx.fillText(title, W / 2, 100);
   ctx.font = "16px Trebuchet MS";
-  ctx.fillText("Thanks for playing! Press R to start again.", W / 2, 130);
+  ctx.fillText(sub, W / 2, 130);
+}
+
+// ---------------------------------------------------------------------
+// Captain Comet - the superhero. Blue suit, red cape, yellow star.
+// ---------------------------------------------------------------------
+function drawStar(cx, cy, outer, inner) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+// opts.flying: cape streams out and there's no ground shadow
+function drawHero(x, y, t, opts) {
+  const flying = opts && opts.flying;
+  ctx.save();
+  ctx.translate(x, y);
+
+  if (!flying) {
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.beginPath();
+    ctx.ellipse(0, 22, 18, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const bob = flying ? Math.sin(t * 4) * 3 : 0;
+  const flap = Math.sin(t * 8) * 6;
+
+  // Cape (behind everything)
+  ctx.fillStyle = "#d8262e";
+  ctx.beginPath();
+  ctx.moveTo(-13, -14 + bob);
+  ctx.lineTo(13, -14 + bob);
+  if (flying) {
+    ctx.lineTo(34 + flap, 26 + bob);
+    ctx.lineTo(-34 - flap, 26 + bob);
+  } else {
+    ctx.lineTo(18, 20 + flap * 0.3);
+    ctx.lineTo(-18, 20 - flap * 0.3);
+  }
+  ctx.closePath();
+  ctx.fill();
+
+  // Legs + red boots
+  ctx.fillStyle = "#2a58c8";
+  ctx.fillRect(-9, 4 + bob, 7, 12);
+  ctx.fillRect(2, 4 + bob, 7, 12);
+  ctx.fillStyle = "#d8262e";
+  ctx.fillRect(-10, 13 + bob, 9, 7);
+  ctx.fillRect(1, 13 + bob, 9, 7);
+
+  // Body
+  ctx.fillStyle = "#2a58c8";
+  roundRect(-14, -16 + bob, 28, 26, 8);
+  ctx.fill();
+  ctx.fillStyle = "#ffd23f";
+  ctx.fillRect(-14, 2 + bob, 28, 4); // belt
+  drawStar(0, -6 + bob, 7, 3);
+
+  // Arms - raised up when flying, on hips when standing
+  ctx.fillStyle = "#2a58c8";
+  if (flying) {
+    ctx.fillRect(-19, -32 + bob, 6, 20);
+    ctx.fillRect(13, -32 + bob, 6, 20);
+    ctx.fillStyle = "#d8262e";
+    ctx.fillRect(-20, -36 + bob, 8, 6);
+    ctx.fillRect(12, -36 + bob, 8, 6);
+  } else {
+    ctx.fillRect(-19, -12 + bob, 6, 16);
+    ctx.fillRect(13, -12 + bob, 6, 16);
+    ctx.fillStyle = "#d8262e";
+    ctx.fillRect(-20, 2 + bob, 8, 6);
+    ctx.fillRect(12, 2 + bob, 8, 6);
+  }
+
+  // Head
+  ctx.fillStyle = "#f1c27d";
+  ctx.beginPath();
+  ctx.arc(0, -25 + bob, 12, 0, Math.PI * 2);
+  ctx.fill();
+  // Hair with a heroic swoop
+  ctx.fillStyle = "#1a1a2a";
+  ctx.beginPath();
+  ctx.arc(0, -30 + bob, 12, Math.PI, 0);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(-4, -38 + bob, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // Mask
+  ctx.fillStyle = "#1a1a2a";
+  ctx.fillRect(-11, -28 + bob, 22, 6);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(-7, -27 + bob, 4, 3);
+  ctx.fillRect(3, -27 + bob, 4, 3);
+
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.font = "12px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("Captain Comet", x, y - 50);
+}
+
+// The hero flying with Douglas dangling underneath
+function drawHeroCarrying(x, y, t) {
+  drawHero(x, y, t, { flying: true });
+  drawCharacter(x, y + 40, "down", "#e0763c", "#2a4a7a", "#5a3a1a", t * 6, null);
+}
+
+// ---------------------------------------------------------------------
+// PORTAL CUTSCENE - Captain Comet flies Douglas through a glowing portal.
+// Used twice: desert -> Sky Realm, then Sky Realm -> the monster's cave.
+// ---------------------------------------------------------------------
+const portalCutscene = {
+  t: 0,
+  duration: 5,
+  next: null,
+  from: "desert",
+};
+
+function startPortalCutscene(next, from) {
+  portalCutscene.next = next;
+  portalCutscene.from = from;
+  startTransition(STATE.PORTAL);
+}
+
+function setupPortalCutscene() {
+  portalCutscene.t = 0;
+}
+
+function updatePortalCutscene(dt) {
+  portalCutscene.t += dt;
+  if (portalCutscene.t >= portalCutscene.duration && !game.transition) {
+    startTransition(portalCutscene.next);
+  }
+}
+
+function drawPortal(x, y, size, t) {
+  ctx.save();
+  ctx.translate(x, y);
+  const colors = ["#3a0a6a", "#6a2ad0", "#9a5aff", "#40d0ff", "#c8f4ff"];
+  colors.forEach((c, i) => {
+    const r = size * (1 - i / colors.length);
+    ctx.save();
+    ctx.rotate(t * (i % 2 === 0 ? 2 : -3) + i);
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 0.7, r, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+  // Sparkles swirling around the edge
+  ctx.fillStyle = "#fff";
+  for (let i = 0; i < 12; i++) {
+    const a = t * 2.5 + (i * Math.PI) / 6;
+    ctx.beginPath();
+    ctx.arc(Math.cos(a) * size * 0.85, Math.sin(a) * size * 1.1, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawStarrySky() {
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, "#1a0a3a");
+  grad.addColorStop(1, "#5a2a8a");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  // Twinkling stars (positions come from a fixed formula so they don't jump around)
+  const now = performance.now() / 1000;
+  for (let i = 0; i < 70; i++) {
+    const sx = (i * 137) % W;
+    const sy = (i * 71) % H;
+    const twinkle = 0.4 + Math.sin(now * 2 + i) * 0.4;
+    ctx.fillStyle = `rgba(255,255,255,${Math.max(0.1, twinkle)})`;
+    ctx.fillRect(sx, sy, 2, 2);
+  }
+}
+
+function drawPortalCutscene() {
+  const t = portalCutscene.t;
+  const now = performance.now() / 1000;
+
+  if (portalCutscene.from === "desert") {
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, "#e07850");
+    skyGrad.addColorStop(1, "#ffd0a0");
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+    // Clouds zooming past
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    for (let i = 0; i < 6; i++) {
+      const cx = W - ((t * 400 + i * 190) % (W + 200));
+      const cy = 80 + ((i * 97) % 400);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 60, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    drawStarrySky();
+  }
+
+  // The portal grows as they get close
+  const portalX = 720;
+  const portalY = 300;
+  const portalSize = 60 + Math.min(1, t / 3) * 90;
+  drawPortal(portalX, portalY, portalSize, now);
+
+  // Hero + Douglas fly toward the portal, shrinking as they go "in"
+  const flyT = Math.min(1, t / 3.5);
+  const hx = -80 + (portalX + 80) * flyT;
+  const hy = 380 - 80 * flyT + Math.sin(t * 3) * 10;
+  const scale = t < 3 ? 1 : Math.max(0, 1 - (t - 3) / 0.6);
+  if (scale > 0) {
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.scale(scale, scale);
+    drawHeroCarrying(0, 0, now);
+    ctx.restore();
+  }
+
+  // Bright flash once they're through
+  if (t > 3.6) {
+    const a = Math.min(1, (t - 3.6) / 0.8);
+    ctx.fillStyle = `rgba(230, 210, 255, ${a})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.font = "bold 20px Trebuchet MS";
+  ctx.textAlign = "center";
+  const caption = portalCutscene.from === "desert"
+    ? "Captain Comet flies Douglas into a glowing portal!"
+    : "Back through the portal... to the monster's cave!";
+  ctx.fillStyle = "#fff";
+  ctx.fillText(caption, W / 2, 60);
+  ctx.font = "14px Trebuchet MS";
+  ctx.fillText("(press SPACE to skip)", W / 2, 86);
+}
+
+// ---------------------------------------------------------------------
+// Dialogue box - a list of lines shown one at a time at the bottom of
+// the screen. Press SPACE (or E) to go to the next line.
+// ---------------------------------------------------------------------
+const dialogue = {
+  lines: [], // { speaker, text }
+  index: 0,
+  onDone: null,
+};
+
+function startDialogue(lines, onDone) {
+  dialogue.lines = lines;
+  dialogue.index = 0;
+  dialogue.onDone = onDone || null;
+}
+
+function dialogueActive() {
+  return dialogue.index < dialogue.lines.length;
+}
+
+function advanceDialogue() {
+  dialogue.index++;
+  if (!dialogueActive() && dialogue.onDone) {
+    const done = dialogue.onDone;
+    dialogue.onDone = null;
+    done();
+  }
+}
+
+function clearDialogue() {
+  dialogue.lines = [];
+  dialogue.index = 0;
+  dialogue.onDone = null;
+}
+
+const SPEAKER_COLORS = {
+  "Captain Comet": "#2a58c8",
+  Douglas: "#e0763c",
+  "Monster Teacher": "#3f7a3f",
+  Teacher: "#4a8a4a",
+};
+
+function drawDialogue() {
+  if (!dialogueActive()) return;
+  const line = dialogue.lines[dialogue.index];
+  const boxX = 60, boxY = H - 130, boxW = W - 120, boxH = 110;
+
+  ctx.fillStyle = "rgba(255,255,255,0.96)";
+  ctx.strokeStyle = "#3a2a1a";
+  ctx.lineWidth = 3;
+  roundRect(boxX, boxY, boxW, boxH, 14);
+  ctx.fill();
+  ctx.stroke();
+
+  // Speaker name tag
+  ctx.font = "bold 15px Trebuchet MS";
+  const nameW = ctx.measureText(line.speaker).width + 24;
+  ctx.fillStyle = SPEAKER_COLORS[line.speaker] || "#555";
+  roundRect(boxX + 16, boxY - 14, nameW, 26, 8);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "left";
+  ctx.fillText(line.speaker, boxX + 28, boxY + 4);
+
+  ctx.fillStyle = "#222";
+  ctx.font = "18px Trebuchet MS";
+  const lines = wrapText(line.text, boxW - 60);
+  lines.forEach((l, i) => ctx.fillText(l, boxX + 28, boxY + 40 + i * 24));
+
+  if (Math.floor(performance.now() / 400) % 2 === 0) {
+    ctx.font = "13px Trebuchet MS";
+    ctx.fillStyle = "#777";
+    ctx.textAlign = "right";
+    ctx.fillText("SPACE to continue ▶", boxX + boxW - 18, boxY + boxH - 12);
+  }
+}
+
+// ---------------------------------------------------------------------
+// Douglas's superpowers
+//   SPACE      - Power Blast (shoots the way he's facing)
+//   SHIFT      - Super Dash (a quick burst of speed, can't get hit)
+//   Q (hold)   - Force Shield (blocks things, but he can't move)
+// ---------------------------------------------------------------------
+const BLAST_SPEED = 520;
+const BLAST_COOLDOWN = 0.28;
+const DASH_TIME = 0.22;
+const DASH_SPEED = 620;
+const DASH_COOLDOWN = 0.8;
+
+const powers = {
+  unlocked: { blast: false, dash: false, shield: false },
+  blasts: [],
+  blastCooldown: 0,
+  dashTime: 0,
+  dashCooldown: 0,
+  dashDx: 0,
+  dashDy: 0,
+  shielding: false,
+  trail: [], // ghost images left behind while dashing
+  sparks: [], // little bursts when something gets hit or blocked
+};
+
+function resetPowers() {
+  powers.blasts = [];
+  powers.blastCooldown = 0;
+  powers.dashTime = 0;
+  powers.dashCooldown = 0;
+  powers.shielding = false;
+  powers.trail = [];
+  powers.sparks = [];
+}
+
+function facingVector() {
+  if (player.facing === "left") return { dx: -1, dy: 0 };
+  if (player.facing === "right") return { dx: 1, dy: 0 };
+  if (player.facing === "up") return { dx: 0, dy: -1 };
+  return { dx: 0, dy: 1 };
+}
+
+function tryBlast() {
+  if (!powers.unlocked.blast || powers.blastCooldown > 0 || powers.shielding) return;
+  const { dx, dy } = facingVector();
+  powers.blasts.push({
+    x: player.x + dx * 20,
+    y: player.y - 10 + dy * 20,
+    vx: dx * BLAST_SPEED,
+    vy: dy * BLAST_SPEED,
+  });
+  powers.blastCooldown = BLAST_COOLDOWN;
+}
+
+function tryDash() {
+  if (!powers.unlocked.dash || powers.dashCooldown > 0 || powers.shielding) return;
+  let { dx, dy } = getMoveVector();
+  if (dx === 0 && dy === 0) ({ dx, dy } = facingVector());
+  powers.dashDx = dx;
+  powers.dashDy = dy;
+  powers.dashTime = DASH_TIME;
+  powers.dashCooldown = DASH_COOLDOWN;
+}
+
+function addSparks(x, y, color) {
+  for (let i = 0; i < 10; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = 60 + Math.random() * 120;
+    powers.sparks.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5, color });
+  }
+}
+
+// Moves Douglas and his blasts around. canAct is false during dialogue.
+function updatePowers(dt, bounds, canAct) {
+  powers.blastCooldown = Math.max(0, powers.blastCooldown - dt);
+  powers.dashCooldown = Math.max(0, powers.dashCooldown - dt);
+  powers.shielding = canAct && powers.unlocked.shield && keys["q"];
+
+  if (canAct) {
+    if (powers.dashTime > 0) {
+      powers.dashTime -= dt;
+      player.x += powers.dashDx * DASH_SPEED * dt;
+      player.y += powers.dashDy * DASH_SPEED * dt;
+      powers.trail.push({ x: player.x, y: player.y, life: 0.25 });
+      player.x = Math.max(bounds.x1, Math.min(bounds.x2, player.x));
+      player.y = Math.max(bounds.y1, Math.min(bounds.y2, player.y));
+    } else if (!powers.shielding) {
+      updatePlayerMovement(dt, bounds);
+    } else {
+      player.moving = false;
+    }
+  } else {
+    player.moving = false;
+  }
+
+  powers.blasts.forEach((b) => {
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+  });
+  powers.blasts = powers.blasts.filter((b) => b.x > -20 && b.x < W + 20 && b.y > -20 && b.y < H + 20);
+
+  powers.trail.forEach((g) => (g.life -= dt));
+  powers.trail = powers.trail.filter((g) => g.life > 0);
+
+  powers.sparks.forEach((s) => {
+    s.x += s.vx * dt;
+    s.y += s.vy * dt;
+    s.life -= dt;
+  });
+  powers.sparks = powers.sparks.filter((s) => s.life > 0);
+}
+
+function drawPoweredDouglas(blink) {
+  // Dash ghosts
+  powers.trail.forEach((g) => {
+    ctx.save();
+    ctx.globalAlpha = g.life * 2;
+    drawCharacter(g.x, g.y, player.facing, "#ffb070", "#7aa0e0", "#c09070", 0, null);
+    ctx.restore();
+  });
+
+  // A soft power glow around Douglas once he has any powers
+  if (powers.unlocked.blast) {
+    const pulse = 0.25 + Math.sin(performance.now() / 250) * 0.1;
+    ctx.fillStyle = `rgba(120, 220, 255, ${pulse})`;
+    ctx.beginPath();
+    ctx.ellipse(player.x, player.y - 8, 26, 36, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (!blink) {
+    drawCharacter(player.x, player.y, player.facing, "#e0763c", "#2a4a7a", "#5a3a1a", player.moving ? player.walkPhase : 0, "Douglas");
+  }
+
+  if (powers.shielding) {
+    ctx.fillStyle = "rgba(120, 200, 255, 0.35)";
+    ctx.strokeStyle = "rgba(200, 240, 255, 0.95)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y - 8, 38, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawBlastsAndSparks() {
+  powers.blasts.forEach((b) => {
+    ctx.fillStyle = "rgba(80, 200, 255, 0.5)";
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#e8fbff";
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  powers.sparks.forEach((s) => {
+    ctx.fillStyle = s.color;
+    ctx.globalAlpha = Math.max(0, s.life * 2);
+    ctx.fillRect(s.x - 2, s.y - 2, 4, 4);
+    ctx.globalAlpha = 1;
+  });
+}
+
+// Little panel in the corner listing the powers Douglas has learned
+function drawPowersPanel() {
+  const list = [];
+  if (powers.unlocked.blast) list.push("SPACE  Power Blast");
+  if (powers.unlocked.dash) list.push("SHIFT  Super Dash");
+  if (powers.unlocked.shield) list.push("Q (hold)  Force Shield");
+  if (list.length === 0) return;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  roundRect(12, 12, 200, 30 + list.length * 20, 10);
+  ctx.fill();
+  ctx.fillStyle = "#ffd23f";
+  ctx.font = "bold 13px Trebuchet MS";
+  ctx.textAlign = "left";
+  ctx.fillText("YOUR POWERS", 24, 32);
+  ctx.fillStyle = "#fff";
+  ctx.font = "13px Trebuchet MS";
+  list.forEach((l, i) => ctx.fillText(l, 24, 52 + i * 20));
+}
+
+function drawGoalText(text) {
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.font = "bold 17px Trebuchet MS";
+  const w = ctx.measureText(text).width + 30;
+  roundRect(W / 2 - w / 2, H - 44, w, 32, 10);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.fillText(text, W / 2, H - 22);
+}
+
+// ---------------------------------------------------------------------
+// HERO REALM - a floating island in the sky where Captain Comet tells
+// Douglas about his powers and trains him, one power at a time.
+// ---------------------------------------------------------------------
+const REALM_BOUNDS = { x1: 110, y1: 170, x2: 850, y2: 520 };
+
+const training = {
+  step: "intro", // intro -> blast -> dash -> shield -> done
+  hero: { x: 150, y: 220 },
+  targets: [],
+  rings: [],
+  comets: [],
+  cometTimer: 0,
+  blocked: 0,
+  hint: null,
+  hintTimer: 0,
+};
+
+function heroSays(text) {
+  return { speaker: "Captain Comet", text };
+}
+
+function setupTraining() {
+  resetPowers();
+  powers.unlocked = { blast: false, dash: false, shield: false };
+  training.step = "intro";
+  training.targets = [];
+  training.rings = [];
+  training.comets = [];
+  training.hint = null;
+  player.x = 480;
+  player.y = 420;
+  player.facing = "left";
+
+  startDialogue(
+    [
+      heroSays("Whew! You're safe now, kid. I'm Captain Comet!"),
+      { speaker: "Douglas", text: "Whoa... where are we?!" },
+      heroSays("This is the Sky Realm, a secret place on the other side of the portal."),
+      heroSays("I brought you here because I sensed something special about you, Douglas..."),
+      heroSays("You have SUPERPOWERS!"),
+      { speaker: "Douglas", text: "Me?! Superpowers?!" },
+      heroSays("That's right. And that monster at your school? It's your teacher, under an evil spell."),
+      heroSays("Only someone with powers like yours can break it. But first, you need training!"),
+    ],
+    startBlastLesson
+  );
+}
+
+function startBlastLesson() {
+  startDialogue(
+    [
+      heroSays("Lesson one: the POWER BLAST!"),
+      heroSays("Press SPACE to shoot a blast of energy in the direction you're facing."),
+      heroSays("Knock down all three of those training targets!"),
+    ],
+    () => {
+      training.step = "blast";
+      powers.unlocked.blast = true;
+      training.targets = [
+        { x: 330, y: 230, hit: false },
+        { x: 620, y: 210, hit: false },
+        { x: 780, y: 440, hit: false },
+      ];
+    }
+  );
+}
+
+function startDashLesson() {
+  startDialogue(
+    [
+      heroSays("Great shooting, Douglas! You're a natural!"),
+      heroSays("Lesson two: the SUPER DASH!"),
+      heroSays("Move with the arrow keys and press SHIFT to zoom forward in a flash."),
+      heroSays("Walking won't count. You have to DASH through all three glowing rings!"),
+    ],
+    () => {
+      training.step = "dash";
+      powers.unlocked.dash = true;
+      training.targets = [];
+      training.rings = [
+        { x: 290, y: 400, done: false },
+        { x: 520, y: 260, done: false },
+        { x: 740, y: 400, done: false },
+      ];
+    }
+  );
+}
+
+function startShieldLesson() {
+  startDialogue(
+    [
+      heroSays("Whoa, you're FAST! Nice dashing!"),
+      heroSays("Last lesson: the FORCE SHIELD!"),
+      heroSays("Hold Q to put up your shield. You can't move while it's up, but nothing can get through."),
+      heroSays("I'm going to toss some comets at you. Block three of them!"),
+    ],
+    () => {
+      training.step = "shield";
+      powers.unlocked.shield = true;
+      training.rings = [];
+      training.comets = [];
+      training.cometTimer = 1.0;
+      training.blocked = 0;
+    }
+  );
+}
+
+function finishTraining() {
+  training.step = "done";
+  training.comets = [];
+  startDialogue(
+    [
+      heroSays("INCREDIBLE! You blocked them all!"),
+      heroSays("Douglas... you are now FULLY TRAINED."),
+      { speaker: "Douglas", text: "I really have superpowers! This is awesome!" },
+      heroSays("Now it's time. Your teacher is hiding in a dark cave, still under that spell."),
+      heroSays("Let's go break it! Hold on tight!"),
+    ],
+    () => startPortalCutscene(STATE.CAVE, "realm")
+  );
+}
+
+function showTrainingHint(text) {
+  training.hint = text;
+  training.hintTimer = 2.2;
+}
+
+function updateTraining(dt) {
+  const canAct = !dialogueActive() && training.step !== "done";
+  updatePowers(dt, REALM_BOUNDS, canAct);
+  if (training.hintTimer > 0) training.hintTimer -= dt;
+
+  if (training.step === "blast") {
+    powers.blasts.forEach((b) => {
+      training.targets.forEach((tg) => {
+        if (!tg.hit && Math.hypot(b.x - tg.x, b.y - (tg.y - 20)) < 30) {
+          tg.hit = true;
+          b.x = -999; // removes the blast on the next update
+          addSparks(tg.x, tg.y - 20, "#ffd23f");
+        }
+      });
+    });
+    if (training.targets.every((tg) => tg.hit)) {
+      training.step = "between";
+      startDashLesson();
+    }
+  } else if (training.step === "dash") {
+    training.rings.forEach((r) => {
+      if (r.done) return;
+      if (Math.hypot(player.x - r.x, player.y - r.y) < 34) {
+        if (powers.dashTime > 0) {
+          r.done = true;
+          addSparks(r.x, r.y, "#7af0ff");
+        } else if (training.hintTimer <= 0) {
+          showTrainingHint("Too slow! Press SHIFT to DASH through the ring!");
+        }
+      }
+    });
+    if (training.rings.every((r) => r.done)) {
+      training.step = "between";
+      startShieldLesson();
+    }
+  } else if (training.step === "shield") {
+    training.cometTimer -= dt;
+    if (training.cometTimer <= 0) {
+      training.cometTimer = 1.6;
+      const hx = training.hero.x + 20;
+      const hy = training.hero.y - 20;
+      const d = Math.hypot(player.x - hx, player.y - 10 - hy) || 1;
+      const speed = 240;
+      training.comets.push({
+        x: hx, y: hy,
+        vx: ((player.x - hx) / d) * speed,
+        vy: ((player.y - 10 - hy) / d) * speed,
+      });
+    }
+    training.comets.forEach((c) => {
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      if (Math.hypot(c.x - player.x, c.y - (player.y - 8)) < (powers.shielding ? 40 : 22)) {
+        c.gone = true;
+        if (powers.shielding) {
+          training.blocked++;
+          addSparks(c.x, c.y, "#bfe8ff");
+        } else {
+          addSparks(c.x, c.y, "#ff9040");
+          showTrainingHint("Bonk! Hold Q to put your shield up!");
+        }
+      }
+    });
+    training.comets = training.comets.filter((c) => !c.gone && c.x > -30 && c.x < W + 30 && c.y > -30 && c.y < H + 30);
+    if (training.blocked >= 3) finishTraining();
+  }
+}
+
+function drawComet(x, y, vx, vy) {
+  const d = Math.hypot(vx, vy) || 1;
+  ctx.strokeStyle = "rgba(255, 170, 60, 0.6)";
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x - (vx / d) * 30, y - (vy / d) * 30);
+  ctx.stroke();
+  ctx.fillStyle = "#ffcf5c";
+  ctx.beginPath();
+  ctx.arc(x, y, 9, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawTraining() {
+  drawStarrySky();
+  const now = performance.now() / 1000;
+
+  // A smaller portal still swirling in the background
+  drawPortal(870, 90, 40, now);
+
+  // Floating island
+  ctx.fillStyle = "#7a5a3a";
+  ctx.beginPath();
+  ctx.moveTo(70, 470);
+  ctx.lineTo(890, 470);
+  ctx.lineTo(700, 590);
+  ctx.lineTo(480, 620);
+  ctx.lineTo(260, 590);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#6fc26b";
+  ctx.beginPath();
+  ctx.ellipse(480, 340, 430, 210, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#86d480";
+  ctx.beginPath();
+  ctx.ellipse(480, 330, 390, 180, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Training targets (bullseye on a post)
+  training.targets.forEach((tg) => {
+    ctx.fillStyle = "#7a4a2a";
+    ctx.fillRect(tg.x - 3, tg.y - 10, 6, 28);
+    if (tg.hit) {
+      ctx.fillStyle = "#b09070";
+      ctx.beginPath();
+      ctx.ellipse(tg.x, tg.y + 16, 18, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ["#d8262e", "#fff", "#d8262e", "#fff"].forEach((c, i) => {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.arc(tg.x, tg.y - 20, 20 - i * 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+  });
+
+  // Dash rings
+  training.rings.forEach((r) => {
+    const pulse = r.done ? 0.3 : 0.7 + Math.sin(now * 5) * 0.3;
+    ctx.strokeStyle = r.done ? `rgba(160,160,160,${pulse})` : `rgba(120, 240, 255, ${pulse})`;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.ellipse(r.x, r.y - 10, 26, 36, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  drawHero(training.hero.x, training.hero.y, now, {});
+  drawPoweredDouglas(false);
+
+  training.comets.forEach((c) => drawComet(c.x, c.y, c.vx, c.vy));
+  drawBlastsAndSparks();
+
+  drawPowersPanel();
+
+  if (!dialogueActive()) {
+    if (training.step === "blast") {
+      const left = training.targets.filter((tg) => !tg.hit).length;
+      drawGoalText(`Face a target and press SPACE to blast it! (${left} left)`);
+    } else if (training.step === "dash") {
+      const left = training.rings.filter((r) => !r.done).length;
+      drawGoalText(`Press SHIFT while moving to DASH through the rings! (${left} left)`);
+    } else if (training.step === "shield") {
+      drawGoalText(`Hold Q to block the comets! (${training.blocked} / 3 blocked)`);
+    }
+    if (training.hint && training.hintTimer > 0) {
+      drawSpeechBubble(training.hero.x, training.hero.y - 50, training.hint);
+    }
+  }
+
+  drawDialogue();
+}
+
+// ---------------------------------------------------------------------
+// CAVE - the big showdown with the monster teacher
+// ---------------------------------------------------------------------
+const CAVE_BOUNDS = { x1: 80, y1: 280, x2: 880, y2: 550 };
+const MONSTER_MAX_HP = 20;
+const MAX_HEARTS = 5;
+
+const cave = {
+  phase: "intro", // intro -> fight -> (lost) -> won -> end
+  monster: null,
+  papers: [], // pop quizzes the monster throws!
+  hearts: MAX_HEARTS,
+  hurtTimer: 0,
+  shake: 0,
+  cheerTimer: 0,
+  heroSpeech: null,
+  heroSpeechTimer: 0,
+  winTimer: 0,
+};
+
+function resetCaveFight() {
+  resetPowers();
+  cave.papers = [];
+  cave.hearts = MAX_HEARTS;
+  cave.hurtTimer = 0;
+  cave.shake = 0;
+  cave.cheerTimer = 3;
+  cave.heroSpeech = null;
+  cave.monster = { x: 480, y: 180, hp: MONSTER_MAX_HP, dir: 1, throwTimer: 2, hurtFlash: 0 };
+  player.x = 480;
+  player.y = 480;
+  player.facing = "up";
+}
+
+function setupCave() {
+  powers.unlocked = { blast: true, dash: true, shield: true };
+  resetCaveFight();
+  cave.phase = "intro";
+  cave.winTimer = 0;
+  startDialogue(
+    [
+      heroSays("There it is, Douglas... the monster's lair."),
+      { speaker: "Monster Teacher", text: "RAAAWR! Douglas! You ran out of class!" },
+      { speaker: "Monster Teacher", text: "Nobody escapes my POP QUIZ! Take THIS!" },
+      { speaker: "Douglas", text: "Not today! I'm going to break your spell!" },
+      heroSays("Use everything I taught you. Blast it, dash away, and shield yourself. You can do this!"),
+    ],
+    () => (cave.phase = "fight")
+  );
+}
+
+function monsterThrow(angleOffset) {
+  const m = cave.monster;
+  const sx = m.x, sy = m.y - 10;
+  const angle = Math.atan2(player.y - 10 - sy, player.x - sx) + angleOffset;
+  const speed = m.hp <= MONSTER_MAX_HP / 2 ? 260 : 210;
+  cave.papers.push({ x: sx, y: sy, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, spin: 0 });
+}
+
+function updateCave(dt) {
+  const canAct = cave.phase === "fight" && !dialogueActive();
+  updatePowers(dt, CAVE_BOUNDS, canAct);
+  if (cave.shake > 0) cave.shake = Math.max(0, cave.shake - dt);
+  if (cave.heroSpeechTimer > 0) {
+    cave.heroSpeechTimer -= dt;
+    if (cave.heroSpeechTimer <= 0) cave.heroSpeech = null;
+  }
+
+  const m = cave.monster;
+  cave.hurtTimer = Math.max(0, cave.hurtTimer - dt);
+
+  if (cave.phase === "won") {
+    cave.winTimer += dt;
+    if (cave.winTimer > 2.2 && m.isTeacher !== true) {
+      m.isTeacher = true;
+      m.y = 260;
+      startDialogue(
+        [
+          { speaker: "Teacher", text: "Huh...? Where am I? Douglas, is that you?" },
+          heroSays("Douglas broke the evil spell with his superpowers!"),
+          { speaker: "Teacher", text: "Oh my... I'm so sorry for chasing you, Douglas. Thank you for saving me!" },
+          { speaker: "Teacher", text: "And to say thank you... no more pop quizzes. I promise!" },
+          { speaker: "Douglas", text: "WOO-HOO!" },
+          heroSays("Great work, partner. The world is lucky to have a hero like you."),
+        ],
+        () => (cave.phase = "end")
+      );
+    }
+    return;
+  }
+
+  if (cave.phase !== "fight") return;
+
+  m.hurtFlash = Math.max(0, m.hurtFlash - dt);
+
+  // Monster stomps back and forth, faster once it's angry (half health)
+  const angry = m.hp <= MONSTER_MAX_HP / 2;
+  m.x += m.dir * (angry ? 170 : 110) * dt;
+  if (m.x > 800) m.dir = -1;
+  if (m.x < 160) m.dir = 1;
+
+  m.throwTimer -= dt;
+  if (m.throwTimer <= 0) {
+    if (angry) {
+      monsterThrow(-0.3);
+      monsterThrow(0);
+      monsterThrow(0.3);
+      m.throwTimer = 1.3;
+    } else {
+      monsterThrow(0);
+      m.throwTimer = 1.5;
+    }
+  }
+
+  // Douglas's blasts hit the monster (or knock quiz papers out of the air)
+  powers.blasts.forEach((b) => {
+    if (Math.hypot(b.x - m.x, b.y - (m.y - 20)) < 42) {
+      addSparks(b.x, b.y, "#7af0ff");
+      b.x = -999;
+      m.hp--;
+      m.hurtFlash = 0.15;
+      return;
+    }
+    cave.papers.forEach((p) => {
+      if (!p.gone && Math.hypot(b.x - p.x, b.y - p.y) < 18) {
+        p.gone = true;
+        b.x = -999;
+        addSparks(p.x, p.y, "#fff");
+      }
+    });
+  });
+
+  // Quiz papers flying at Douglas
+  cave.papers.forEach((p) => {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.spin += dt * 8;
+    if (p.gone) return;
+    const hitRange = powers.shielding ? 40 : 20;
+    if (Math.hypot(p.x - player.x, p.y - (player.y - 8)) < hitRange) {
+      if (powers.shielding) {
+        p.gone = true;
+        addSparks(p.x, p.y, "#bfe8ff");
+      } else if (powers.dashTime > 0 || cave.hurtTimer > 0) {
+        // Dashing (or just got hurt): the paper flies right through
+      } else {
+        p.gone = true;
+        cave.hearts--;
+        cave.hurtTimer = 1.0;
+        cave.shake = 0.3;
+        addSparks(player.x, player.y - 10, "#ff5050");
+      }
+    }
+  });
+  cave.papers = cave.papers.filter((p) => !p.gone && p.x > -30 && p.x < W + 30 && p.y > -30 && p.y < H + 30);
+
+  // Captain Comet cheers Douglas on from the side
+  cave.cheerTimer -= dt;
+  if (cave.cheerTimer <= 0) {
+    cave.cheerTimer = 5 + Math.random() * 3;
+    const cheers = angry
+      ? ["It's getting angry! Keep your shield ready!", "Almost there, Douglas!", "Dash to dodge those papers!"]
+      : ["You can do it, Douglas!", "Face it and press SPACE to blast!", "Blast the papers out of the air!", "Nice moves, kid!"];
+    cave.heroSpeech = cheers[Math.floor(Math.random() * cheers.length)];
+    cave.heroSpeechTimer = 2.5;
+  }
+
+  if (m.hp <= 0) {
+    cave.phase = "won";
+    cave.winTimer = 0;
+    cave.papers = [];
+    powers.blasts = [];
+    cave.shake = 1.0;
+    cave.heroSpeech = null;
+  } else if (cave.hearts <= 0) {
+    cave.phase = "lost";
+    cave.papers = [];
+  }
+}
+
+function drawQuizPaper(p) {
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(p.spin);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(-9, -11, 18, 22);
+  ctx.strokeStyle = "#c81818";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-9, -11, 18, 22);
+  ctx.fillStyle = "#c81818";
+  ctx.font = "bold 12px Trebuchet MS";
+  ctx.textAlign = "center";
+  ctx.fillText("?", 0, 5);
+  ctx.restore();
+}
+
+function drawCave() {
+  ctx.save();
+  if (cave.shake > 0) {
+    const mag = cave.shake * 10;
+    ctx.translate((Math.random() - 0.5) * mag, (Math.random() - 0.5) * mag);
+  }
+  const now = performance.now() / 1000;
+
+  // Cave walls + floor
+  ctx.fillStyle = "#2a2230";
+  ctx.fillRect(-20, -20, W + 40, H + 40);
+  ctx.fillStyle = "#3e3446";
+  ctx.beginPath();
+  ctx.ellipse(480, 400, 470, 230, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#4a3f52";
+  ctx.beginPath();
+  ctx.ellipse(480, 410, 420, 190, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Stalactites hanging from the ceiling
+  ctx.fillStyle = "#1a1420";
+  for (let i = 0; i < 16; i++) {
+    const sx = i * 64 + 10;
+    const len = 30 + ((i * 37) % 50);
+    ctx.beginPath();
+    ctx.moveTo(sx, 0);
+    ctx.lineTo(sx + 18, len);
+    ctx.lineTo(sx + 36, 0);
+    ctx.fill();
+  }
+
+  // Glowing crystals
+  [[90, 330], [870, 300], [150, 560], [820, 560]].forEach(([cx, cy], i) => {
+    const glow = 0.5 + Math.sin(now * 2 + i) * 0.3;
+    ctx.fillStyle = `rgba(160, 90, 255, ${glow * 0.4})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 10, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#b07aff";
+    ctx.beginPath();
+    ctx.moveTo(cx - 10, cy);
+    ctx.lineTo(cx, cy - 34);
+    ctx.lineTo(cx + 10, cy);
+    ctx.fill();
+  });
+
+  const m = cave.monster;
+
+  // Monster (or the teacher, once the spell breaks)
+  if (m.isTeacher) {
+    drawCharacter(m.x, m.y, "down", "#4a8a4a", "#2a2a2a", "#3a2a1a", 0, "Teacher");
+  } else if (cave.phase === "won") {
+    // Spell breaking: flashing and shrinking
+    if (Math.floor(now * 12) % 2 === 0) drawMonster(m.x, m.y, now * 20);
+    const a = Math.min(1, cave.winTimer / 2.2);
+    ctx.fillStyle = `rgba(255, 255, 255, ${a * 0.8})`;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y - 20, 30 + cave.winTimer * 40, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    if (m.hurtFlash > 0) ctx.globalAlpha = 0.5;
+    drawMonster(m.x, m.y, now * 6.5);
+    ctx.globalAlpha = 1;
+  }
+
+  drawHero(90, 470, now, {});
+  if (cave.heroSpeech) drawSpeechBubble(90 + 60, 470 - 50, cave.heroSpeech);
+
+  // Douglas blinks for a moment after getting hit
+  const blink = cave.hurtTimer > 0 && Math.floor(now * 14) % 2 === 0;
+  drawPoweredDouglas(blink);
+
+  cave.papers.forEach(drawQuizPaper);
+  drawBlastsAndSparks();
+
+  ctx.restore();
+
+  // --- HUD (doesn't shake) ---
+  drawPowersPanel();
+
+  if (cave.phase === "fight" || cave.phase === "lost") {
+    // Monster health bar
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    roundRect(W / 2 - 160, 14, 320, 40, 10);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 13px Trebuchet MS";
+    ctx.textAlign = "center";
+    ctx.fillText("MONSTER TEACHER", W / 2, 30);
+    ctx.fillStyle = "#555";
+    ctx.fillRect(W / 2 - 140, 36, 280, 10);
+    ctx.fillStyle = m.hp <= MONSTER_MAX_HP / 2 ? "#ff4040" : "#6ad04a";
+    ctx.fillRect(W / 2 - 140, 36, 280 * Math.max(0, m.hp) / MONSTER_MAX_HP, 10);
+
+    // Douglas's hearts
+    ctx.textAlign = "right";
+    ctx.font = "24px Trebuchet MS";
+    let hearts = "";
+    for (let i = 0; i < MAX_HEARTS; i++) hearts += i < cave.hearts ? "❤" : "♡";
+    ctx.fillStyle = "#ff5a6a";
+    ctx.fillText(hearts, W - 20, 40);
+  }
+
+  if (cave.phase === "lost") {
+    ctx.fillStyle = "rgba(0,0,0,0.65)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.font = "bold 34px Trebuchet MS";
+    ctx.fillText("Oof! The pop quizzes got you!", W / 2, H / 2 - 20);
+    ctx.font = "18px Trebuchet MS";
+    ctx.fillText("Captain Comet says: \"Get up, kid. Heroes never give up!\"", W / 2, H / 2 + 20);
+    ctx.font = "bold 20px Trebuchet MS";
+    ctx.fillText("Press SPACE to try again", W / 2, H / 2 + 65);
+  }
+
+  if (cave.phase === "end") {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    roundRect(W / 2 - 290, 60, 580, 120, 14);
+    ctx.fill();
+    ctx.fillStyle = "#ffd23f";
+    ctx.font = "bold 30px Trebuchet MS";
+    ctx.textAlign = "center";
+    ctx.fillText("Douglas saved the day!", W / 2, 105);
+    ctx.fillStyle = "#fff";
+    ctx.font = "18px Trebuchet MS";
+    ctx.fillText("THE END. Thanks for playing! Press R to play again.", W / 2, 145);
+  }
+
+  drawDialogue();
 }
 
 // ---------------------------------------------------------------------
@@ -1899,6 +3120,9 @@ function onEnterState(state) {
   else if (state === STATE.CLASSROOM) setupClassroom();
   else if (state === STATE.TAXI_CUTSCENE) setupTaxiCutscene();
   else if (state === STATE.DESERT_END) setupDesertEnd();
+  else if (state === STATE.PORTAL) setupPortalCutscene();
+  else if (state === STATE.HERO_REALM) setupTraining();
+  else if (state === STATE.CAVE) setupCave();
 }
 
 // ---------------------------------------------------------------------
@@ -1927,6 +3151,9 @@ function update(dt) {
     else if (game.state === STATE.CLASSROOM) updateClassroom(dt);
     else if (game.state === STATE.TAXI_CUTSCENE) updateTaxiCutscene(dt);
     else if (game.state === STATE.DESERT_END) updateDesertEnd(dt);
+    else if (game.state === STATE.PORTAL) updatePortalCutscene(dt);
+    else if (game.state === STATE.HERO_REALM) updateTraining(dt);
+    else if (game.state === STATE.CAVE) updateCave(dt);
   }
   updateTransition(dt);
 }
@@ -1942,6 +3169,9 @@ function render() {
   else if (game.state === STATE.CLASSROOM) drawClassroom();
   else if (game.state === STATE.TAXI_CUTSCENE) drawTaxiCutscene();
   else if (game.state === STATE.DESERT_END) drawDesertEnd();
+  else if (game.state === STATE.PORTAL) drawPortalCutscene();
+  else if (game.state === STATE.HERO_REALM) drawTraining();
+  else if (game.state === STATE.CAVE) drawCave();
   drawTransition();
 }
 
